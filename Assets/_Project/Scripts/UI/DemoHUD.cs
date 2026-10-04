@@ -739,9 +739,8 @@ namespace SmartSpace.UI
             }
 
             // B3. Scrollable Bubble Messages Area
-            float currentInputH = GetInputBarHeight(chatAreaWidth);
             float topHeaderH = 32f + (_currentChannel == ChatChannel.Whisper ? 28f : 0f);
-            float bottomReservedH = currentInputH + 16f + (_showQuickEmojiDrawer ? 100f : 0f);
+            float bottomReservedH = 66f + (_showQuickEmojiDrawer ? 100f : 0f);
             float scrollH = panelHeight - topHeaderH - bottomReservedH;
             if (scrollH < 120f) scrollH = 120f;
 
@@ -810,8 +809,8 @@ namespace SmartSpace.UI
                 DrawQuickEmojiDrawer();
             }
 
-            // B5. Bottom Input Bar (自适应动态高度无截断完整显示长文本)
-            DrawBottomInputBar(chatAreaWidth, currentInputH);
+            // B5. Bottom Input Bar (从一开始就固定舒适高度，初始即完整容纳多行长文本)
+            DrawBottomInputBar(chatAreaWidth);
 
             GUILayout.EndVertical();
 
@@ -998,26 +997,13 @@ namespace SmartSpace.UI
             GUILayout.EndHorizontal();
         }
 
-        private float GetInputBarHeight(float contentWidth)
+        private void DrawBottomInputBar(float contentWidth)
         {
-            float rightBtnsW = 34f + 4f + 66f + 8f; // 112f
+            float inputBarH = 52f;
+            float rightBtnsW = 36f + 4f + 68f + 8f; // Emoji(36) + Sp(4) + Send(68) + Margins(8) = 116f
             float inputW = Mathf.Max(180f, contentWidth - rightBtnsW);
 
-            if (string.IsNullOrEmpty(_inputChat) || _inputFieldStyle == null)
-            {
-                return 34f;
-            }
-
-            float textH = _inputFieldStyle.CalcHeight(new GUIContent(_inputChat), inputW);
-            return Mathf.Clamp(textH + 4f, 34f, 76f);
-        }
-
-        private void DrawBottomInputBar(float contentWidth, float inputH)
-        {
-            float rightBtnsW = 34f + 4f + 66f + 8f; // Emoji(34) + Sp(4) + Send(66) + Margins(8) = 112f
-            float inputW = Mathf.Max(180f, contentWidth - rightBtnsW);
-
-            GUILayout.BeginHorizontal(GUILayout.Height(inputH));
+            GUILayout.BeginHorizontal(GUILayout.Height(inputBarH));
 
             // Intercept Enter key for sending before TextArea inserts a newline (Shift+Enter to add newline)
             Event e = Event.current;
@@ -1035,9 +1021,9 @@ namespace SmartSpace.UI
                 }
             }
 
-            // 1. White Rounded Input Box (Auto-expanding height + wordWrap to show FULL text without ANY truncation)
+            // 1. White Rounded Input Box (一开始即固定为 52px 舒适高度，完美容纳2~3行长文本且绝不抖动)
             GUI.SetNextControlName("AolaChatInputField");
-            Rect inputRect = GUILayoutUtility.GetRect(inputW, inputH, GUILayout.Width(inputW), GUILayout.Height(inputH));
+            Rect inputRect = GUILayoutUtility.GetRect(inputW, inputBarH, GUILayout.Width(inputW), GUILayout.Height(inputBarH));
             _inputChat = GUI.TextArea(inputRect, _inputChat, 120, _inputFieldStyle);
 
             if (string.IsNullOrEmpty(_inputChat) && !isFocused)
@@ -1047,14 +1033,14 @@ namespace SmartSpace.UI
 
             GUILayout.Space(4);
 
-            // Right side buttons container (vertically aligned to bottom of input area)
-            GUILayout.BeginVertical(GUILayout.Height(inputH));
+            // Right side buttons container (vertically centered with the tall input box)
+            GUILayout.BeginVertical(GUILayout.Height(inputBarH));
             GUILayout.FlexibleSpace();
 
             GUILayout.BeginHorizontal();
 
             // 2. Yellow Smiley Emoji Button (1:1 Procedural Icon matching reference image)
-            if (GUILayout.Button(_texSmileyIcon, _emojiRoundBtnStyle, GUILayout.Width(34), GUILayout.Height(34)))
+            if (GUILayout.Button(_texSmileyIcon, _emojiRoundBtnStyle, GUILayout.Width(36), GUILayout.Height(36)))
             {
                 _showQuickEmojiDrawer = !_showQuickEmojiDrawer;
             }
@@ -1062,7 +1048,7 @@ namespace SmartSpace.UI
             GUILayout.Space(4);
 
             // 3. Vibrant Golden-Yellow Send Button
-            if (GUILayout.Button("发 送", _sendBtnStyle, GUILayout.Width(66), GUILayout.Height(34))
+            if (GUILayout.Button("发 送", _sendBtnStyle, GUILayout.Width(68), GUILayout.Height(36))
                 && !string.IsNullOrEmpty(_inputChat.Trim()))
             {
                 SendMessageContent(_inputChat.Trim());
@@ -1071,6 +1057,7 @@ namespace SmartSpace.UI
             }
 
             GUILayout.EndHorizontal();
+            GUILayout.FlexibleSpace();
             GUILayout.EndVertical();
 
             GUILayout.EndHorizontal();
