@@ -68,6 +68,8 @@ namespace SmartSpace.Network
         public event Action<bool> OnConnectionStateChanged;
         public event Action<string, string, string> OnChatMessageReceived; // senderId, username, message
         public event Action<string, string, EmoteType> OnPlayerEmoteReceived; // senderId, username, emoteType
+        public event Action<string, string> OnPlayerJoined; // sessionId, username
+        public event Action<string> OnPlayerLeft; // sessionId
 
         private void Awake()
         {
@@ -181,6 +183,7 @@ namespace SmartSpace.Network
                 {
                     Debug.Log($"[NetworkManager] Player added: {key} ({player.username})");
                     SpawnPlayer(key, player);
+                    OnPlayerJoined?.Invoke(key, player.username);
 
                     // Track changes on this player
                     callbacks.OnChange(player, () =>
@@ -200,6 +203,7 @@ namespace SmartSpace.Network
                 callbacks.OnRemove(state => state.players, (key, player) =>
                 {
                     Debug.Log($"[NetworkManager] Player removed: {key}");
+                    OnPlayerLeft?.Invoke(key);
                     DespawnPlayer(key);
                 });
             }
