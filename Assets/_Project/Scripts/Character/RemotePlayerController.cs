@@ -1,3 +1,4 @@
+using System.Collections;
 using UnityEngine;
 using SmartSpace.Network.Schema;
 using SmartSpace.UI;
@@ -21,6 +22,9 @@ namespace SmartSpace.Character
         private string _lastChatMsg = "";
         private double _lastChatTime = 0;
 
+        private EmoteEffects _emoteEffects;
+        private Coroutine _emoteAnimCoroutine;
+
         public string SessionId { get; private set; }
         public string Username { get; private set; }
 
@@ -28,6 +32,18 @@ namespace SmartSpace.Character
         {
             _targetPosition = transform.position;
             _targetRotationY = transform.eulerAngles.y;
+
+            if (visualRoot == null)
+            {
+                Transform v = transform.Find("Visual");
+                visualRoot = v != null ? v : transform;
+            }
+
+            _emoteEffects = gameObject.GetComponent<EmoteEffects>();
+            if (_emoteEffects == null)
+            {
+                _emoteEffects = gameObject.AddComponent<EmoteEffects>();
+            }
         }
 
         public void Initialize(Player playerSchema)
@@ -59,6 +75,13 @@ namespace SmartSpace.Character
 
             _targetPosition = newPos;
             _targetRotationY = (float)playerSchema.rotY;
+
+            // Check if remote player triggered an emote (animState >= 10)
+            if (playerSchema.animState >= 10 && playerSchema.animState != _currentAnimState)
+            {
+                TriggerRemoteEmote((EmoteType)playerSchema.animState);
+            }
+
             _currentAnimState = playerSchema.animState;
 
             // Check if there is a new chat message
@@ -71,6 +94,93 @@ namespace SmartSpace.Character
             }
         }
 
+        public void TriggerRemoteEmote(EmoteType type)
+        {
+            if (overheadUI != null)
+            {
+                overheadUI.ShowEmoji(type);
+            }
+
+            if (_emoteEffects != null)
+            {
+                _emoteEffects.PlayEmoteFeedback(type);
+            }
+
+            if (_emoteAnimCoroutine != null)
+            {
+                StopCoroutine(_emoteAnimCoroutine);
+            }
+            _emoteAnimCoroutine = StartCoroutine(PlayEmoteAnimationRoutine(type));
+        }
+
+        private IEnumerator PlayEmoteAnimationRoutine(EmoteType type)
+        {
+            if (visualRoot == null) yield break;
+
+            float duration = 2.0f;
+            float elapsed = 0f;
+            Vector3 origPos = Vector3.zero;
+            Quaternion origRot = Quaternion.identity;
+            Vector3 origScale = Vector3.one;
+
+            while (elapsed < duration)
+            {
+                elapsed += Time.deltaTime;
+                float progress = elapsed / duration;
+
+                switch (type)
+                {
+                    case EmoteType.Wave:
+                    case EmoteType.HighFive:
+                        float wave = Mathf.Sin(elapsed * 18f) * 16f * (1f - progress * 0.4f);
+                        visualRoot.localRotation = Quaternion.Euler(0, 0, -wave);
+                        visualRoot.localPosition = new Vector3(0, Mathf.Abs(Mathf.Sin(elapsed * 9f)) * 0.1f, 0);
+                        break;
+
+                    case EmoteType.Heart:
+                        float beat = 1f + Mathf.Max(0, Mathf.Sin(elapsed * 14f)) * 0.28f * (1f - progress * 0.35f);
+                        visualRoot.localScale = new Vector3(beat, beat * 1.05f, beat);
+                        visualRoot.localPosition = new Vector3(0, (beat - 1f) * 0.2f, 0);
+                        break;
+
+                    case EmoteType.Clap:
+                        float hop = Mathf.Abs(Mathf.Sin(elapsed * 24f)) * 0.12f;
+                        float shudder = Mathf.Sin(elapsed * 48f) * 4f;
+                        visualRoot.localPosition = new Vector3(0, hop, 0);
+                        visualRoot.localRotation = Quaternion.Euler(0, shudder, 0);
+                        break;
+
+                    case EmoteType.Bow:
+                        float bowAngle = Mathf.Sin(Mathf.Clamp01(progress * 1.5f) * Mathf.PI) * 32f;
+                        visualRoot.localRotation = Quaternion.Euler(bowAngle, 0, 0);
+                        visualRoot.localPosition = new Vector3(0, -Mathf.Sin(bowAngle * Mathf.Deg2Rad) * 0.15f, 0);
+                        break;
+
+                    case EmoteType.Dance:
+                        float spin = elapsed * 420f;
+                        float danceHop = Mathf.Abs(Mathf.Sin(elapsed * 16f)) * 0.2f;
+                        visualRoot.localRotation = Quaternion.Euler(0, spin, Mathf.Sin(elapsed * 12f) * 10f);
+                        visualRoot.localPosition = new Vector3(0, danceHop, 0);
+                        break;
+                }
+
+                yield return null;
+            }
+
+            ResetVisualTransform();
+            _emoteAnimCoroutine = null;
+        }
+
+        private void ResetVisualTransform()
+        {
+            if (visualRoot != null)
+            {
+                visualRoot.localPosition = Vector3.zero;
+                visualRoot.localRotation = Quaternion.identity;
+                visualRoot.localScale = Vector3.one;
+            }
+        }
+
         private void Update()
         {
             // Smoothly interpolate position (Dead reckoning / Lerp)
@@ -80,15 +190,18 @@ namespace SmartSpace.Character
             Quaternion targetRot = Quaternion.Euler(0, _targetRotationY, 0);
             transform.rotation = Quaternion.Slerp(transform.rotation, targetRot, Time.deltaTime * rotationLerpSpeed);
 
-            // Update procedural motion feedback if visualRoot exists
-            UpdateProceduralVisuals();
+            // Update procedural motion for walk/run if not currently performing an emote
+            if (_emoteAnimCoroutine == null)
+            {
+                UpdateProceduralVisuals();
+            }
         }
 
         private void UpdateProceduralVisuals()
         {
             if (visualRoot == null) return;
 
-            // Simple procedural animation depending on state (Walk=1, Run=2, Jump=3, Wave=4)
+            // Simple procedural animation depending on state (Walk=1, Run=2)
             if (_currentAnimState == 1) // Walk
             {
                 float bob = Mathf.Sin(Time.time * 10f) * 0.05f;
@@ -99,15 +212,11 @@ namespace SmartSpace.Character
                 float bob = Mathf.Sin(Time.time * 18f) * 0.1f;
                 visualRoot.localPosition = new Vector3(0, bob, 0);
             }
-            else if (_currentAnimState == 4) // Wave
-            {
-                float tilt = Mathf.Sin(Time.time * 12f) * 8f;
-                visualRoot.localRotation = Quaternion.Euler(0, 0, tilt);
-            }
-            else
+            else if (_currentAnimState < 10)
             {
                 visualRoot.localPosition = Vector3.Lerp(visualRoot.localPosition, Vector3.zero, Time.deltaTime * 10f);
                 visualRoot.localRotation = Quaternion.Slerp(visualRoot.localRotation, Quaternion.identity, Time.deltaTime * 10f);
+                visualRoot.localScale = Vector3.Lerp(visualRoot.localScale, Vector3.one, Time.deltaTime * 10f);
             }
         }
 

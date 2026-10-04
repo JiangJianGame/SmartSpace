@@ -102,25 +102,25 @@ namespace SmartSpace.Editor
             nameObj.transform.SetParent(uiObj.transform, false);
             nameObj.transform.localPosition = Vector3.zero;
             var nameTmp = nameObj.AddComponent<TextMeshPro>();
-            nameTmp.fontSize = 4.5f;
+            nameTmp.fontSize = 3.2f;
             nameTmp.alignment = TextAlignmentOptions.Center;
-            nameTmp.text = isLocal ? "[我] 本地玩家" : "远程访客";
-            nameTmp.rectTransform.sizeDelta = new Vector2(6f, 1f);
+            nameTmp.text = isLocal ? "[YOU]" : "Guest";
+            nameTmp.rectTransform.sizeDelta = new Vector2(5f, 0.8f);
 
             // Chat Bubble Root
             GameObject bubbleRoot = new GameObject("ChatBubble");
             bubbleRoot.transform.SetParent(uiObj.transform, false);
-            bubbleRoot.transform.localPosition = new Vector3(0, 0.6f, 0);
+            bubbleRoot.transform.localPosition = new Vector3(0, 0.5f, 0);
 
             // Chat Text
             GameObject chatTextObj = new GameObject("ChatText");
             chatTextObj.transform.SetParent(bubbleRoot.transform, false);
             var chatTmp = chatTextObj.AddComponent<TextMeshPro>();
-            chatTmp.fontSize = 4f;
+            chatTmp.fontSize = 2.8f;
             chatTmp.alignment = TextAlignmentOptions.Center;
             chatTmp.color = Color.white;
             chatTmp.text = "...";
-            chatTmp.rectTransform.sizeDelta = new Vector2(8f, 1.5f);
+            chatTmp.rectTransform.sizeDelta = new Vector2(6f, 1.2f);
 
             // Wire OverheadUI references via SerializedObject
             SerializedObject soUI = new SerializedObject(overheadUI);
@@ -128,6 +128,8 @@ namespace SmartSpace.Editor
             soUI.FindProperty("chatBubbleText").objectReferenceValue = chatTmp;
             soUI.FindProperty("chatBubbleRoot").objectReferenceValue = bubbleRoot;
             soUI.ApplyModifiedPropertiesWithoutUndo();
+
+            root.AddComponent<EmoteEffects>();
 
             if (isLocal)
             {
@@ -139,6 +141,7 @@ namespace SmartSpace.Editor
                 var controller = root.AddComponent<LocalPlayerController>();
                 SerializedObject soCtrl = new SerializedObject(controller);
                 soCtrl.FindProperty("overheadUI").objectReferenceValue = overheadUI;
+                soCtrl.FindProperty("visualTransform").objectReferenceValue = visual.transform;
                 soCtrl.ApplyModifiedPropertiesWithoutUndo();
             }
             else
@@ -231,6 +234,9 @@ namespace SmartSpace.Editor
 
             var demoHUD = netManagerObj.GetComponent<DemoHUD>();
             if (demoHUD == null) demoHUD = netManagerObj.AddComponent<DemoHUD>();
+
+            var emoteWheel = netManagerObj.GetComponent<EmoteWheelUI>();
+            if (emoteWheel == null) emoteWheel = netManagerObj.AddComponent<EmoteWheelUI>();
 
             // Spawn Point
             GameObject spawnPointObj = GameObject.Find("SpawnPoint");

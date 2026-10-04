@@ -1,3 +1,4 @@
+using System.Collections;
 using UnityEngine;
 using SmartSpace.Network;
 using SmartSpace.UI;
@@ -21,6 +22,7 @@ namespace SmartSpace.Character
 
         [Header("References")]
         [SerializeField] private PlayerOverheadUI overheadUI;
+        [SerializeField] private Transform visualTransform;
 
         private CharacterController _controller;
         private Camera _mainCamera;
@@ -33,8 +35,10 @@ namespace SmartSpace.Character
         private float _syncTimer;
         private float _heartbeatTimer;
 
-        // Animation States: 0=Idle, 1=Walk, 2=Run, 3=Jump, 4=Wave
+        // Animation States: 0=Idle, 1=Walk, 2=Run, 3=Jump, 10+=Emotes
         private sbyte _currentAnimState = 0;
+        private EmoteEffects _emoteEffects;
+        private Coroutine _emoteAnimCoroutine;
 
         public string SessionId { get; set; }
         public string Username { get; set; }
@@ -43,6 +47,18 @@ namespace SmartSpace.Character
         {
             _controller = GetComponent<CharacterController>();
             _mainCamera = Camera.main;
+
+            if (visualTransform == null)
+            {
+                Transform v = transform.Find("Visual");
+                visualTransform = v != null ? v : transform;
+            }
+
+            _emoteEffects = gameObject.GetComponent<EmoteEffects>();
+            if (_emoteEffects == null)
+            {
+                _emoteEffects = gameObject.AddComponent<EmoteEffects>();
+            }
         }
 
         private void Start()
@@ -98,12 +114,21 @@ namespace SmartSpace.Character
                 _controller.Move(moveDir * (currentSpeed * Time.deltaTime));
 
                 _currentAnimState = (sbyte)(isRunning ? 2 : 1);
+
+                // Cancel emote if moving
+                if (_emoteAnimCoroutine != null)
+                {
+                    StopCoroutine(_emoteAnimCoroutine);
+                    _emoteAnimCoroutine = null;
+                    ResetVisualTransform();
+                }
             }
             else
             {
-                if (_currentAnimState != 4) // Don't override wave emote immediately
+                // Idle (if not performing emote >= 10)
+                if (_currentAnimState < 10)
                 {
-                    _currentAnimState = 0; // Idle
+                    _currentAnimState = 0;
                 }
             }
 
@@ -158,9 +183,105 @@ namespace SmartSpace.Character
         public void TriggerEmote(sbyte emoteId)
         {
             _currentAnimState = emoteId;
+            EmoteType type = (EmoteType)emoteId;
+
+            // 1. Overhead 3D Emoji
+            if (overheadUI != null)
+            {
+                overheadUI.ShowEmoji(type);
+            }
+
+            // 2. Audio & Particle VFX
+            if (_emoteEffects != null)
+            {
+                _emoteEffects.PlayEmoteFeedback(type);
+            }
+
+            // 3. Procedural Body Expression
+            if (_emoteAnimCoroutine != null)
+            {
+                StopCoroutine(_emoteAnimCoroutine);
+            }
+            _emoteAnimCoroutine = StartCoroutine(PlayEmoteAnimationRoutine(type));
+
+            // 4. Send to server
             if (NetworkManager.Instance != null && NetworkManager.Instance.IsConnected)
             {
                 NetworkManager.Instance.SendEmote(emoteId);
+            }
+        }
+
+        private IEnumerator PlayEmoteAnimationRoutine(EmoteType type)
+        {
+            if (visualTransform == null) yield break;
+
+            float duration = 2.0f;
+            float elapsed = 0f;
+            Vector3 origPos = Vector3.zero;
+            Quaternion origRot = Quaternion.identity;
+            Vector3 origScale = Vector3.one;
+
+            while (elapsed < duration)
+            {
+                elapsed += Time.deltaTime;
+                float progress = elapsed / duration;
+
+                switch (type)
+                {
+                    case EmoteType.Wave:
+                    case EmoteType.HighFive:
+                        // Enthusiastic lean right and wave side-to-side
+                        float wave = Mathf.Sin(elapsed * 18f) * 16f * (1f - progress * 0.4f);
+                        visualTransform.localRotation = Quaternion.Euler(0, 0, -wave);
+                        visualTransform.localPosition = new Vector3(0, Mathf.Abs(Mathf.Sin(elapsed * 9f)) * 0.1f, 0);
+                        break;
+
+                    case EmoteType.Heart:
+                        // Heartbeat pulse animation
+                        float beat = 1f + Mathf.Max(0, Mathf.Sin(elapsed * 14f)) * 0.28f * (1f - progress * 0.35f);
+                        visualTransform.localScale = new Vector3(beat, beat * 1.05f, beat);
+                        visualTransform.localPosition = new Vector3(0, (beat - 1f) * 0.2f, 0);
+                        break;
+
+                    case EmoteType.Clap:
+                        // Energetic small hops with micro vibration
+                        float hop = Mathf.Abs(Mathf.Sin(elapsed * 24f)) * 0.12f;
+                        float shudder = Mathf.Sin(elapsed * 48f) * 4f;
+                        visualTransform.localPosition = new Vector3(0, hop, 0);
+                        visualTransform.localRotation = Quaternion.Euler(0, shudder, 0);
+                        break;
+
+                    case EmoteType.Bow:
+                        // Respectful forward tilt and hold
+                        float bowAngle = Mathf.Sin(Mathf.Clamp01(progress * 1.5f) * Mathf.PI) * 32f;
+                        visualTransform.localRotation = Quaternion.Euler(bowAngle, 0, 0);
+                        visualTransform.localPosition = new Vector3(0, -Mathf.Sin(bowAngle * Mathf.Deg2Rad) * 0.15f, 0);
+                        break;
+
+                    case EmoteType.Dance:
+                        // Joyful 360 spin and bounce
+                        float spin = elapsed * 420f;
+                        float danceHop = Mathf.Abs(Mathf.Sin(elapsed * 16f)) * 0.2f;
+                        visualTransform.localRotation = Quaternion.Euler(0, spin, Mathf.Sin(elapsed * 12f) * 10f);
+                        visualTransform.localPosition = new Vector3(0, danceHop, 0);
+                        break;
+                }
+
+                yield return null;
+            }
+
+            ResetVisualTransform();
+            _currentAnimState = 0; // Return to idle
+            _emoteAnimCoroutine = null;
+        }
+
+        private void ResetVisualTransform()
+        {
+            if (visualTransform != null)
+            {
+                visualTransform.localPosition = Vector3.zero;
+                visualTransform.localRotation = Quaternion.identity;
+                visualTransform.localScale = Vector3.one;
             }
         }
 

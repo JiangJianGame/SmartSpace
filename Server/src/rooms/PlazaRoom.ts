@@ -58,6 +58,11 @@ export class PlazaRoom extends Room<{ state: PlazaState }> {
       const player = this.state.players.get(client.sessionId);
       if (player) {
         player.animState = emoteId;
+        this.broadcast("playerEmote", {
+          senderId: client.sessionId,
+          username: player.username,
+          emoteId: emoteId
+        });
       }
     });
   }

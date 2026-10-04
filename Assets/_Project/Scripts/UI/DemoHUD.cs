@@ -9,11 +9,12 @@ namespace SmartSpace.UI
     {
         private string _inputChat = "";
         private readonly List<string> _chatLogs = new List<string>();
-        private const int MaxLogs = 6;
+        private const int MaxLogs = 7;
 
         private GUIStyle _boxStyle;
         private GUIStyle _labelStyle;
         private GUIStyle _btnStyle;
+        private GUIStyle _emoteBtnStyle;
         private GUIStyle _inputStyle;
         private bool _stylesInitialized = false;
 
@@ -22,6 +23,7 @@ namespace SmartSpace.UI
             if (NetworkManager.Instance != null)
             {
                 NetworkManager.Instance.OnChatMessageReceived += HandleChatMessage;
+                NetworkManager.Instance.OnPlayerEmoteReceived += HandlePlayerEmote;
             }
         }
 
@@ -30,12 +32,24 @@ namespace SmartSpace.UI
             if (NetworkManager.Instance != null)
             {
                 NetworkManager.Instance.OnChatMessageReceived -= HandleChatMessage;
+                NetworkManager.Instance.OnPlayerEmoteReceived -= HandlePlayerEmote;
             }
         }
 
         private void HandleChatMessage(string senderId, string username, string message)
         {
             string log = $"<b>[{username}]</b>: {message}";
+            AddLog(log);
+        }
+
+        private void HandlePlayerEmote(string senderId, string username, EmoteType emoteType)
+        {
+            string log = $"<color=#80D8FF><b>[{username}]</b></color> <color=#FFD54F>{EmoteHelper.GetChatText(emoteType)}</color>";
+            AddLog(log);
+        }
+
+        private void AddLog(string log)
+        {
             _chatLogs.Add(log);
             if (_chatLogs.Count > MaxLogs)
             {
@@ -66,6 +80,12 @@ namespace SmartSpace.UI
                 fontStyle = FontStyle.Bold
             };
 
+            _emoteBtnStyle = new GUIStyle(GUI.skin.button)
+            {
+                fontSize = 12,
+                fontStyle = FontStyle.Bold
+            };
+
             _inputStyle = new GUIStyle(GUI.skin.textField)
             {
                 fontSize = 13
@@ -83,9 +103,9 @@ namespace SmartSpace.UI
             int playerCount = NetworkManager.Instance != null ? NetworkManager.Instance.PlayerCount : 0;
 
             // 1. Top-Left Status Panel
-            GUILayout.BeginArea(new Rect(20, 20, 320, 160), GUI.skin.box);
-            GUILayout.Label("<size=15><b>智慧空间 · 网络同步测试 Demo</b></size>", _labelStyle);
-            GUILayout.Space(4);
+            GUILayout.BeginArea(new Rect(20, 20, 340, 165), GUI.skin.box);
+            GUILayout.Label("<size=15><b>智慧空间 · 社交与漫游系统</b></size>", _labelStyle);
+            GUILayout.Space(3);
 
             string statusColor = isConnected ? "#00E676" : "#FF5252";
             string statusText = isConnected ? "已连接" : "未连接";
@@ -93,23 +113,23 @@ namespace SmartSpace.UI
             GUILayout.Label($"会话 ID: <color=#80D8FF>{sessionId}</color>", _labelStyle);
             GUILayout.Label($"空间在线人数: <color=#FFD54F><b>{playerCount}</b> 人</color>", _labelStyle);
 
-            GUILayout.Space(4);
-            GUILayout.Label("<color=#B0BEC5>操作提示: WASD移动 | Shift疾跑 | 空格跳跃\n鼠标右键按住旋转视角 | 1键打招呼</color>", _labelStyle);
+            GUILayout.Space(3);
+            GUILayout.Label("<color=#B0BEC5>操作提示: WASD移动 | Shift疾跑 | 空格跳跃\n按住 <b>[T]</b> 开启动作轮盘 | 数字键 <b>1~6</b> 快捷表情</color>", _labelStyle);
             GUILayout.EndArea();
 
             // 2. Bottom-Left Chat & Interaction Panel
-            float panelWidth = 380;
-            float panelHeight = 255;
+            float panelWidth = 410;
+            float panelHeight = 295;
             float panelY = Screen.height - panelHeight - 20;
 
             GUILayout.BeginArea(new Rect(20, panelY, panelWidth, panelHeight), GUI.skin.box);
-            GUILayout.Label("<b>空间交流 & 动作</b>", _labelStyle);
+            GUILayout.Label("<b>空间交流 & 社交动作</b>", _labelStyle);
 
             // Chat Log display
-            GUILayout.BeginVertical(GUI.skin.box, GUILayout.Height(100));
+            GUILayout.BeginVertical(GUI.skin.box, GUILayout.Height(105));
             if (_chatLogs.Count == 0)
             {
-                GUILayout.Label("<color=#78909C>暂无发言记录，可在下方输入发送...</color>", _labelStyle);
+                GUILayout.Label("<color=#78909C>暂无交流动态，可输入文字或使用下方动作打招呼...</color>", _labelStyle);
             }
             else
             {
@@ -138,51 +158,55 @@ namespace SmartSpace.UI
             }
             GUILayout.EndHorizontal();
 
-            // Emote action buttons
-            GUILayout.Space(4);
+            // Quick Emote Action Buttons - Row 1
+            GUILayout.Space(3);
             GUILayout.BeginHorizontal();
-            if (GUILayout.Button("👋 打招呼 (Wave)", _btnStyle, GUILayout.Height(26)))
-            {
-                TriggerLocalEmote(4);
-            }
-            if (GUILayout.Button("🎉 欢呼 (Cheer)", _btnStyle, GUILayout.Height(26)))
-            {
-                TriggerLocalEmote(3);
-            }
+            if (GUILayout.Button("👋 挥手 [1]", _emoteBtnStyle, GUILayout.Height(26))) TriggerLocalEmote(EmoteType.Wave);
+            if (GUILayout.Button("💖 比心 [2]", _emoteBtnStyle, GUILayout.Height(26))) TriggerLocalEmote(EmoteType.Heart);
+            if (GUILayout.Button("👏 鼓掌 [3]", _emoteBtnStyle, GUILayout.Height(26))) TriggerLocalEmote(EmoteType.Clap);
             GUILayout.EndHorizontal();
 
-            // Bot spawn button
-            GUILayout.Space(4);
-            if (GUILayout.Button("🤖 生成测试访客 (网络Bot联机)", _btnStyle, GUILayout.Height(26)))
+            // Quick Emote Action Buttons - Row 2
+            GUILayout.BeginHorizontal();
+            if (GUILayout.Button("🙇 鞠躬 [4]", _emoteBtnStyle, GUILayout.Height(26))) TriggerLocalEmote(EmoteType.Bow);
+            if (GUILayout.Button("🕺 跳舞 [5]", _emoteBtnStyle, GUILayout.Height(26))) TriggerLocalEmote(EmoteType.Dance);
+            if (GUILayout.Button("✋ 击掌 [6]", _emoteBtnStyle, GUILayout.Height(26))) TriggerLocalEmote(EmoteType.HighFive);
+            GUILayout.EndHorizontal();
+
+            // Utility buttons - Row 3
+            GUILayout.Space(2);
+            GUILayout.BeginHorizontal();
+            if (GUILayout.Button("🎡 动作轮盘 (Hold T)", _btnStyle, GUILayout.Height(26)))
+            {
+                if (EmoteWheelUI.Instance != null)
+                {
+                    EmoteWheelUI.Instance.OpenWheel();
+                }
+            }
+            if (GUILayout.Button("🤖 生成测试访客 (网络Bot)", _btnStyle, GUILayout.Height(26)))
             {
                 if (NetworkManager.Instance != null && isConnected)
                 {
                     NetworkManager.Instance.SpawnNetworkBot();
                 }
             }
+            GUILayout.EndHorizontal();
 
             GUILayout.EndArea();
         }
 
-        private void Update()
+        private void TriggerLocalEmote(EmoteType type)
         {
-            // Shortcut key 1 for wave emote
-            if (Input.GetKeyDown(KeyCode.Alpha1))
+            if (EmoteWheelUI.Instance != null)
             {
-                TriggerLocalEmote(4);
+                EmoteWheelUI.Instance.TriggerEmote(type);
             }
-        }
-
-        private void TriggerLocalEmote(sbyte emoteId)
-        {
-            var local = FindObjectOfType<LocalPlayerController>();
-            if (local != null)
+            else
             {
-                local.TriggerEmote(emoteId);
-                string emoteName = emoteId == 4 ? "做了一个打招呼动作 👋" : "欢呼跃起 🎉";
-                if (NetworkManager.Instance != null)
+                var local = FindObjectOfType<LocalPlayerController>();
+                if (local != null)
                 {
-                    NetworkManager.Instance.SendChat(emoteName);
+                    local.TriggerEmote((sbyte)type);
                 }
             }
         }

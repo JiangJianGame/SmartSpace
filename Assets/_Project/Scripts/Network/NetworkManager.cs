@@ -34,6 +34,14 @@ namespace SmartSpace.Network
         public double timestamp;
     }
 
+    [Serializable]
+    public class PlayerEmoteBroadcast
+    {
+        public string senderId;
+        public string username;
+        public sbyte emoteId;
+    }
+
     public class NetworkManager : MonoBehaviour
     {
         public static NetworkManager Instance { get; private set; }
@@ -59,6 +67,7 @@ namespace SmartSpace.Network
 
         public event Action<bool> OnConnectionStateChanged;
         public event Action<string, string, string> OnChatMessageReceived; // senderId, username, message
+        public event Action<string, string, EmoteType> OnPlayerEmoteReceived; // senderId, username, emoteType
 
         private void Awake()
         {
@@ -143,6 +152,25 @@ namespace SmartSpace.Network
                 {
                     Debug.Log($"[Chat] {chatMsg.username}: {chatMsg.message}");
                     OnChatMessageReceived?.Invoke(chatMsg.senderId, chatMsg.username, chatMsg.message);
+                });
+
+                // Register player emote message
+                _room.OnMessage<PlayerEmoteBroadcast>("playerEmote", (emoteMsg) =>
+                {
+                    EmoteType type = (EmoteType)emoteMsg.emoteId;
+                    Debug.Log($"[Emote] {emoteMsg.username} performed {type}");
+                    if (emoteMsg.senderId != _room.SessionId)
+                    {
+                        if (_spawnedPlayers.TryGetValue(emoteMsg.senderId, out GameObject playerObj))
+                        {
+                            var remote = playerObj.GetComponent<RemotePlayerController>();
+                            if (remote != null)
+                            {
+                                remote.TriggerRemoteEmote(type);
+                            }
+                        }
+                    }
+                    OnPlayerEmoteReceived?.Invoke(emoteMsg.senderId, emoteMsg.username, type);
                 });
 
                 // Register Schema Callbacks (Colyseus 0.18+)
@@ -305,6 +333,10 @@ namespace SmartSpace.Network
                 var botRoom = await botClient.JoinOrCreate<PlazaState>(roomName, options);
                 _botRooms.Add(botRoom);
 
+                // Ignore incoming broadcasts on bot client
+                botRoom.OnMessage<object>("chatMessage", _ => { });
+                botRoom.OnMessage<object>("playerEmote", _ => { });
+
                 Debug.Log($"[NetworkBot] Bot '{botName}' joined with SessionId: {botRoom.SessionId}");
 
                 StartCoroutine(BotPatrolRoutine(botRoom, botName));
@@ -321,8 +353,8 @@ namespace SmartSpace.Network
             yield return new WaitForSeconds(1.2f);
             if (botRoom != null)
             {
-                botRoom.Send("chat", new ChatMessagePayload { message = $"Hi! I am {botName}!" });
-                botRoom.Send("emote", (sbyte)4); // Wave
+                botRoom.Send("chat", new ChatMessagePayload { message = $"Hi! I am {botName}! 👋" });
+                botRoom.Send("emote", (sbyte)EmoteType.Wave);
             }
 
             float angle = UnityEngine.Random.Range(0f, Mathf.PI * 2);
@@ -332,6 +364,15 @@ namespace SmartSpace.Network
 
             float chatTimer = 0f;
             var waitStep = new WaitForSeconds(0.05f); // 20Hz update rate
+            EmoteType[] pool = new EmoteType[]
+            {
+                EmoteType.Wave,
+                EmoteType.Heart,
+                EmoteType.Clap,
+                EmoteType.Bow,
+                EmoteType.Dance,
+                EmoteType.HighFive
+            };
 
             while (botRoom != null)
             {
@@ -350,11 +391,12 @@ namespace SmartSpace.Network
                 });
 
                 chatTimer += 0.05f;
-                if (chatTimer >= 8f)
+                if (chatTimer >= 6.5f)
                 {
                     chatTimer = 0f;
-                    botRoom.Send("chat", new ChatMessagePayload { message = "Roaming the plaza..." });
-                    botRoom.Send("emote", (sbyte)4);
+                    EmoteType picked = pool[UnityEngine.Random.Range(0, pool.Length)];
+                    botRoom.Send("chat", new ChatMessagePayload { message = EmoteHelper.GetChatText(picked) });
+                    botRoom.Send("emote", (sbyte)picked);
                 }
 
                 yield return waitStep;
