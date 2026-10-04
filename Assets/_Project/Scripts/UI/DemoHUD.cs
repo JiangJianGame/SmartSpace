@@ -48,9 +48,6 @@ namespace SmartSpace.UI
         private Vector2 _scrollPosition = Vector2.zero;
         private bool _shouldScrollToBottom = true;
 
-        // System Marquee Banner Text
-        private string _latestMarqueeNotice = "欢迎来到智慧空间广场！玩家可在露天广场自由漫游、打招呼与社交交互。";
-
         // Whisper (私聊) State
         private string _whisperTargetId = "";
         private string _whisperTargetName = "";
@@ -88,7 +85,6 @@ namespace SmartSpace.UI
         private Texture2D _texMainBg;
         private Texture2D _texTabActive;
         private Texture2D _texTabInactive;
-        private Texture2D _texMarqueeBg;
         private Texture2D _texBubbleBlue;
         private Texture2D _texSendBtnYellow;
         private Texture2D _texInputWhite;
@@ -187,12 +183,10 @@ namespace SmartSpace.UI
         {
             if (connected)
             {
-                _latestMarqueeNotice = "已成功加入智慧空间中央广场频道！";
                 AddSystemMessage("成功连接至空间服务器，随时可与同伴互动！");
             }
             else
             {
-                _latestMarqueeNotice = "已断开与空间服务器的连接。";
                 AddSystemMessage("<color=#FF5252>已断开与空间服务器的连接。</color>");
             }
         }
@@ -253,7 +247,6 @@ namespace SmartSpace.UI
             string myId = NetworkManager.Instance != null ? NetworkManager.Instance.SessionId : "";
             if (sessionId != myId)
             {
-                _latestMarqueeNotice = $"热烈欢迎新访客 【{username}】 踏入智慧空间大广场！✨";
                 AddSystemMessage($"玩家 <color=#FFD54F><b>{username}</b></color> 成功进入了智慧空间广场！✨");
             }
         }
@@ -364,7 +357,6 @@ namespace SmartSpace.UI
             if (_texMainBg != null) Destroy(_texMainBg);
             if (_texTabActive != null) Destroy(_texTabActive);
             if (_texTabInactive != null) Destroy(_texTabInactive);
-            if (_texMarqueeBg != null) Destroy(_texMarqueeBg);
             if (_texBubbleBlue != null) Destroy(_texBubbleBlue);
             if (_texSendBtnYellow != null) Destroy(_texSendBtnYellow);
             if (_texInputWhite != null) Destroy(_texInputWhite);
@@ -387,7 +379,6 @@ namespace SmartSpace.UI
             _texMainBg = MakeSolidTex(2, 2, new Color(0.04f, 0.08f, 0.16f, 0.90f));
             _texTabActive = MakeSolidTex(2, 2, new Color(0.12f, 0.48f, 0.88f, 1.0f)); // Bright Blue from screenshot
             _texTabInactive = MakeSolidTex(2, 2, new Color(0.08f, 0.14f, 0.24f, 0.85f)); // Dark Slate Blue
-            _texMarqueeBg = MakeSolidTex(2, 2, new Color(0.06f, 0.14f, 0.28f, 0.85f));
             _texBubbleBlue = MakeBorderedTex(32, 32, new Color(0.08f, 0.44f, 0.82f, 0.96f), new Color(0.12f, 0.54f, 0.95f, 1f), 1);
             _texSendBtnYellow = MakeSolidTex(2, 2, new Color(1.0f, 0.86f, 0.18f, 1.0f)); // Bright Golden-Yellow from screenshot
             _texInputWhite = MakeSolidTex(2, 2, new Color(0.93f, 0.95f, 0.97f, 1.0f)); // White Input box from screenshot
@@ -429,13 +420,13 @@ namespace SmartSpace.UI
                 hover = { textColor = Color.white, background = _texTabActive }
             };
 
-            // Marquee Banner (Top of chat area)
-            _marqueeStyle = new GUIStyle(GUI.skin.box)
+            // Subtitle / Hint Label Style
+            _marqueeStyle = new GUIStyle(GUI.skin.label)
             {
                 fontSize = 11,
                 richText = true,
                 alignment = TextAnchor.MiddleLeft,
-                normal = { textColor = Color.white, background = _texMarqueeBg },
+                normal = { textColor = new Color(0.7f, 0.85f, 0.95f) },
                 padding = new RectOffset(6, 6, 2, 2)
             };
 
@@ -652,23 +643,6 @@ namespace SmartSpace.UI
 
             GUILayout.FlexibleSpace();
 
-            // Bottom left utility buttons
-            if (GUILayout.Button("🎡 轮盘", _sideActionBtnStyle, GUILayout.Height(28)))
-            {
-                if (EmoteWheelUI.Instance != null) EmoteWheelUI.Instance.OpenWheel();
-            }
-            if (GUILayout.Button("🤖 访客", _sideActionBtnStyle, GUILayout.Height(28)))
-            {
-                if (NetworkManager.Instance != null && NetworkManager.Instance.IsConnected)
-                {
-                    NetworkManager.Instance.SpawnNetworkBot();
-                }
-            }
-            if (GUILayout.Button("◀ 收起", _sideActionBtnStyle, GUILayout.Height(28)))
-            {
-                ToggleExpand();
-            }
-
             GUILayout.EndVertical();
 
             // -------------------------------------------------------------
@@ -676,18 +650,19 @@ namespace SmartSpace.UI
             // -------------------------------------------------------------
             GUILayout.BeginVertical(GUILayout.Width(chatAreaWidth));
 
-            // B1. Top Marquee Banner (顶部跑马灯横幅)
-            DrawMarqueeBanner();
+            // B1. Top Header Bar (右上角操作按钮: 轮盘 / 访客 / 收起)
+            DrawTopHeaderBar();
 
-            // B2. Whisper Target Selector (Only shown in Whisper channel)
+            // B2. Whisper Target Selector (仅私聊频道显示)
             if (_currentChannel == ChatChannel.Whisper)
             {
                 DrawWhisperTargetBar();
             }
 
             // B3. Scrollable Bubble Messages Area
+            float topHeaderH = 32f + (_currentChannel == ChatChannel.Whisper ? 28f : 0f);
             float bottomReservedH = 46f + (_showQuickEmojiDrawer ? 100f : 0f);
-            float scrollH = panelHeight - 34f - bottomReservedH - (_currentChannel == ChatChannel.Whisper ? 28f : 0f);
+            float scrollH = panelHeight - topHeaderH - bottomReservedH;
             if (scrollH < 120f) scrollH = 120f;
 
             _scrollPosition = GUILayout.BeginScrollView(
@@ -781,10 +756,47 @@ namespace SmartSpace.UI
             }
         }
 
-        private void DrawMarqueeBanner()
+        private void DrawTopHeaderBar()
         {
-            GUILayout.BeginHorizontal(_marqueeStyle, GUILayout.Height(26));
-            GUILayout.Label($"📢 <color=#00E5FF><b>系统通知:</b></color> <color=#FFE082>{_latestMarqueeNotice}</color>", _marqueeStyle);
+            GUILayout.BeginHorizontal(GUILayout.Height(28));
+            GUILayout.Space(2);
+
+            string channelTitle = _currentChannel switch
+            {
+                ChatChannel.World => "<color=#1E88E5><b>● 世界频道</b></color>",
+                ChatChannel.Nearby => "<color=#00E5FF><b>● 附近频道</b></color>",
+                ChatChannel.System => "<color=#76FF03><b>● 系统公告</b></color>",
+                ChatChannel.Whisper => "<color=#FF4081><b>● 私聊密语</b></color>",
+                _ => "<color=#80D8FF><b>● 综合</b></color>"
+            };
+            GUILayout.Label(channelTitle, _senderNameOtherStyle, GUILayout.Height(24));
+
+            GUILayout.FlexibleSpace();
+
+            // 右上角操作按钮: 轮盘 / 访客 / 收起
+            if (GUILayout.Button("🎡 轮盘", _sideActionBtnStyle, GUILayout.Width(62), GUILayout.Height(24)))
+            {
+                if (EmoteWheelUI.Instance != null) EmoteWheelUI.Instance.OpenWheel();
+            }
+
+            GUILayout.Space(4);
+
+            if (GUILayout.Button("🤖 访客", _sideActionBtnStyle, GUILayout.Width(62), GUILayout.Height(24)))
+            {
+                if (NetworkManager.Instance != null && NetworkManager.Instance.IsConnected)
+                {
+                    NetworkManager.Instance.SpawnNetworkBot();
+                }
+            }
+
+            GUILayout.Space(4);
+
+            if (GUILayout.Button("◀ 收起", _sideActionBtnStyle, GUILayout.Width(58), GUILayout.Height(24)))
+            {
+                ToggleExpand();
+            }
+
+            GUILayout.Space(4);
             GUILayout.EndHorizontal();
         }
 
