@@ -35,6 +35,25 @@ namespace SmartSpace.Network
     }
 
     [Serializable]
+    public class WhisperPayload
+    {
+        public string targetId;
+        public string message;
+    }
+
+    [Serializable]
+    public class WhisperMessageBroadcast
+    {
+        public string senderId;
+        public string senderName;
+        public string targetId;
+        public string targetName;
+        public string message;
+        public bool isError;
+        public double timestamp;
+    }
+
+    [Serializable]
     public class PlayerEmoteBroadcast
     {
         public string senderId;
@@ -61,12 +80,15 @@ namespace SmartSpace.Network
         private readonly Dictionary<string, GameObject> _spawnedPlayers = new Dictionary<string, GameObject>();
         private static readonly List<NativeWebSocket.WebSocket> _activeWebSockets = new List<NativeWebSocket.WebSocket>();
 
+        public readonly Dictionary<string, string> OnlinePlayers = new Dictionary<string, string>();
+
         public bool IsConnected => _room != null;
         public string SessionId => _room != null ? _room.SessionId : "";
         public int PlayerCount => _spawnedPlayers.Count;
 
         public event Action<bool> OnConnectionStateChanged;
         public event Action<string, string, string> OnChatMessageReceived; // senderId, username, message
+        public event Action<WhisperMessageBroadcast> OnWhisperMessageReceived;
         public event Action<string, string, EmoteType> OnPlayerEmoteReceived; // senderId, username, emoteType
         public event Action<string, string> OnPlayerJoined; // sessionId, username
         public event Action<string> OnPlayerLeft; // sessionId
@@ -156,6 +178,13 @@ namespace SmartSpace.Network
                     OnChatMessageReceived?.Invoke(chatMsg.senderId, chatMsg.username, chatMsg.message);
                 });
 
+                // Register whisper / private chat message
+                _room.OnMessage<WhisperMessageBroadcast>("whisperMessage", (whisperMsg) =>
+                {
+                    Debug.Log($"[Whisper] {whisperMsg.senderName} -> {whisperMsg.targetName}: {whisperMsg.message}");
+                    OnWhisperMessageReceived?.Invoke(whisperMsg);
+                });
+
                 // Register player emote message
                 _room.OnMessage<PlayerEmoteBroadcast>("playerEmote", (emoteMsg) =>
                 {
@@ -182,6 +211,7 @@ namespace SmartSpace.Network
                 callbacks.OnAdd(state => state.players, (key, player) =>
                 {
                     Debug.Log($"[NetworkManager] Player added: {key} ({player.username})");
+                    OnlinePlayers[key] = player.username;
                     SpawnPlayer(key, player);
                     OnPlayerJoined?.Invoke(key, player.username);
 
@@ -203,6 +233,7 @@ namespace SmartSpace.Network
                 callbacks.OnRemove(state => state.players, (key, player) =>
                 {
                     Debug.Log($"[NetworkManager] Player removed: {key}");
+                    OnlinePlayers.Remove(key);
                     OnPlayerLeft?.Invoke(key);
                     DespawnPlayer(key);
                 });
@@ -279,6 +310,7 @@ namespace SmartSpace.Network
                 }
             }
             _spawnedPlayers.Clear();
+            OnlinePlayers.Clear();
         }
 
         public void SendMove(float x, float y, float z, float rotY, sbyte animState)
@@ -315,6 +347,17 @@ namespace SmartSpace.Network
             }
         }
 
+        public void SendWhisper(string targetId, string message)
+        {
+            if (!IsConnected || string.IsNullOrEmpty(targetId) || string.IsNullOrEmpty(message)) return;
+
+            _room.Send("whisper", new WhisperPayload
+            {
+                targetId = targetId,
+                message = message
+            });
+        }
+
         public void SendEmote(sbyte emoteId)
         {
             if (!IsConnected) return;
@@ -341,6 +384,15 @@ namespace SmartSpace.Network
                 botRoom.OnMessage<object>("chatMessage", _ => { });
                 botRoom.OnMessage<object>("playerEmote", _ => { });
 
+                // Auto reply to whispers sent to this bot
+                botRoom.OnMessage<WhisperMessageBroadcast>("whisperMessage", (wMsg) =>
+                {
+                    if (wMsg.targetId == botRoom.SessionId && !wMsg.isError && wMsg.senderId != botRoom.SessionId)
+                    {
+                        StartCoroutine(BotWhisperReplyRoutine(botRoom, wMsg.senderId, wMsg.senderName, botName));
+                    }
+                });
+
                 Debug.Log($"[NetworkBot] Bot '{botName}' joined with SessionId: {botRoom.SessionId}");
 
                 StartCoroutine(BotPatrolRoutine(botRoom, botName));
@@ -348,6 +400,22 @@ namespace SmartSpace.Network
             catch (Exception ex)
             {
                 Debug.LogError($"[NetworkBot] Failed to spawn bot: {ex.Message}");
+            }
+        }
+
+        private System.Collections.IEnumerator BotWhisperReplyRoutine(Room<PlazaState> botRoom, string targetId, string targetName, string botName)
+        {
+            yield return new WaitForSeconds(1.2f);
+            if (botRoom != null)
+            {
+                string[] replies = new string[]
+                {
+                    $"收到你的私信啦！很高兴和你单独聊天~ 😊",
+                    $"哈哈，我也觉得这里很好逛！要一起漫游拍照吗？✨",
+                    $"收到！有空记得常来广场找我玩呀～👋"
+                };
+                string reply = replies[UnityEngine.Random.Range(0, replies.Length)];
+                botRoom.Send("whisper", new WhisperPayload { targetId = targetId, message = reply });
             }
         }
 

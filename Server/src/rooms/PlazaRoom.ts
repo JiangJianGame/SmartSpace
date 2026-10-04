@@ -53,6 +53,46 @@ export class PlazaRoom extends Room<{ state: PlazaState }> {
       }
     });
 
+    // Register whisper / private chat handler
+    this.onMessage("whisper", (client: Client, data: { targetId: string; message: string }) => {
+      const sender = this.state.players.get(client.sessionId);
+      if (!sender || !data || !data.message) return;
+
+      const cleanMsg = data.message.trim().substring(0, 100);
+      const target = this.state.players.get(data.targetId);
+      const targetClient = this.clients.find(c => c.sessionId === data.targetId);
+
+      if (target && targetClient) {
+        const payload = {
+          senderId: client.sessionId,
+          senderName: sender.username,
+          targetId: data.targetId,
+          targetName: target.username,
+          message: cleanMsg,
+          isError: false,
+          timestamp: Date.now()
+        };
+
+        // Send to target recipient
+        targetClient.send("whisperMessage", payload);
+
+        // Echo back to sender
+        if (targetClient.sessionId !== client.sessionId) {
+          client.send("whisperMessage", payload);
+        }
+      } else {
+        client.send("whisperMessage", {
+          senderId: "system",
+          senderName: "系统",
+          targetId: client.sessionId,
+          targetName: sender.username,
+          message: "目标玩家当前不在线或已离开广场。",
+          isError: true,
+          timestamp: Date.now()
+        });
+      }
+    });
+
     // Register emote / greeting handler
     this.onMessage("emote", (client: Client, emoteId: number) => {
       const player = this.state.players.get(client.sessionId);
