@@ -562,16 +562,16 @@ namespace SmartSpace.UI
             _inputFieldStyle = new GUIStyle(GUI.skin.textArea)
             {
                 fontSize = 12,
-                alignment = TextAnchor.MiddleLeft,
+                alignment = TextAnchor.UpperLeft,
                 wordWrap = true,
                 normal = { textColor = new Color(0.12f, 0.12f, 0.12f), background = _texInputWhite }, // Dark text on white
-                padding = new RectOffset(8, 8, 4, 4)
+                padding = new RectOffset(8, 8, 6, 6)
             };
 
             _placeholderStyle = new GUIStyle(GUI.skin.label)
             {
                 fontSize = 12,
-                alignment = TextAnchor.MiddleLeft,
+                alignment = TextAnchor.UpperLeft,
                 richText = true,
                 normal = { textColor = new Color(0.58f, 0.62f, 0.68f) },
                 padding = new RectOffset(0, 0, 0, 0)
@@ -739,8 +739,9 @@ namespace SmartSpace.UI
             }
 
             // B3. Scrollable Bubble Messages Area
+            float currentInputH = GetInputBarHeight(chatAreaWidth);
             float topHeaderH = 32f + (_currentChannel == ChatChannel.Whisper ? 28f : 0f);
-            float bottomReservedH = 50f + (_showQuickEmojiDrawer ? 100f : 0f);
+            float bottomReservedH = currentInputH + 16f + (_showQuickEmojiDrawer ? 100f : 0f);
             float scrollH = panelHeight - topHeaderH - bottomReservedH;
             if (scrollH < 120f) scrollH = 120f;
 
@@ -809,8 +810,8 @@ namespace SmartSpace.UI
                 DrawQuickEmojiDrawer();
             }
 
-            // B5. Bottom Input Bar (1:1 奥拉星输入栏，固定输入宽度防止向右挤压)
-            DrawBottomInputBar(chatAreaWidth);
+            // B5. Bottom Input Bar (自适应动态高度无截断完整显示长文本)
+            DrawBottomInputBar(chatAreaWidth, currentInputH);
 
             GUILayout.EndVertical();
 
@@ -997,17 +998,31 @@ namespace SmartSpace.UI
             GUILayout.EndHorizontal();
         }
 
-        private void DrawBottomInputBar(float contentWidth)
+        private float GetInputBarHeight(float contentWidth)
+        {
+            float rightBtnsW = 34f + 4f + 66f + 8f; // 112f
+            float inputW = Mathf.Max(180f, contentWidth - rightBtnsW);
+
+            if (string.IsNullOrEmpty(_inputChat) || _inputFieldStyle == null)
+            {
+                return 34f;
+            }
+
+            float textH = _inputFieldStyle.CalcHeight(new GUIContent(_inputChat), inputW);
+            return Mathf.Clamp(textH + 4f, 34f, 76f);
+        }
+
+        private void DrawBottomInputBar(float contentWidth, float inputH)
         {
             float rightBtnsW = 34f + 4f + 66f + 8f; // Emoji(34) + Sp(4) + Send(66) + Margins(8) = 112f
             float inputW = Mathf.Max(180f, contentWidth - rightBtnsW);
 
-            GUILayout.BeginHorizontal(GUILayout.Height(34));
+            GUILayout.BeginHorizontal(GUILayout.Height(inputH));
 
-            // Intercept Enter key for sending before TextArea inserts a newline
+            // Intercept Enter key for sending before TextArea inserts a newline (Shift+Enter to add newline)
             Event e = Event.current;
             bool isFocused = (GUI.GetNameOfFocusedControl() == "AolaChatInputField");
-            bool pressEnter = (e.type == EventType.KeyDown && (e.keyCode == KeyCode.Return || e.keyCode == KeyCode.KeypadEnter) && isFocused);
+            bool pressEnter = (e.type == EventType.KeyDown && (e.keyCode == KeyCode.Return || e.keyCode == KeyCode.KeypadEnter) && isFocused && !e.shift);
 
             if (pressEnter)
             {
@@ -1020,20 +1035,26 @@ namespace SmartSpace.UI
                 }
             }
 
-            // 1. White Rounded Input Box (TextArea with wordWrap to show FULL text without truncation)
+            // 1. White Rounded Input Box (Auto-expanding height + wordWrap to show FULL text without ANY truncation)
             GUI.SetNextControlName("AolaChatInputField");
-            Rect inputRect = GUILayoutUtility.GetRect(inputW, 34f, GUILayout.Width(inputW), GUILayout.Height(34f));
+            Rect inputRect = GUILayoutUtility.GetRect(inputW, inputH, GUILayout.Width(inputW), GUILayout.Height(inputH));
             _inputChat = GUI.TextArea(inputRect, _inputChat, 120, _inputFieldStyle);
 
             if (string.IsNullOrEmpty(_inputChat) && !isFocused)
             {
-                GUI.Label(new Rect(inputRect.x + 8, inputRect.y + 8, inputRect.width - 16, 20), "点击输入...", _placeholderStyle);
+                GUI.Label(new Rect(inputRect.x + 8, inputRect.y + 7, inputRect.width - 16, 20), "点击输入...", _placeholderStyle);
             }
 
             GUILayout.Space(4);
 
+            // Right side buttons container (vertically aligned to bottom of input area)
+            GUILayout.BeginVertical(GUILayout.Height(inputH));
+            GUILayout.FlexibleSpace();
+
+            GUILayout.BeginHorizontal();
+
             // 2. Yellow Smiley Emoji Button (1:1 Procedural Icon matching reference image)
-            if (GUI.Button(GUILayoutUtility.GetRect(34, 34, GUILayout.Width(34), GUILayout.Height(34)), _texSmileyIcon, _emojiRoundBtnStyle))
+            if (GUILayout.Button(_texSmileyIcon, _emojiRoundBtnStyle, GUILayout.Width(34), GUILayout.Height(34)))
             {
                 _showQuickEmojiDrawer = !_showQuickEmojiDrawer;
             }
@@ -1048,6 +1069,9 @@ namespace SmartSpace.UI
                 _inputChat = "";
                 GUI.FocusControl(null);
             }
+
+            GUILayout.EndHorizontal();
+            GUILayout.EndVertical();
 
             GUILayout.EndHorizontal();
         }
