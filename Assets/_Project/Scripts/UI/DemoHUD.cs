@@ -8,32 +8,33 @@ namespace SmartSpace.UI
 {
     public enum ChatChannel
     {
-        All = 0,     // 综合
-        Plaza = 1,   // 广场 (公屏)
-        Whisper = 2, // 私聊 (密语)
-        Emote = 3,   // 动作 (社交)
-        System = 4   // 系统 (通知)
+        World = 0,    // 世界 (全服广场)
+        Nearby = 1,   // 附近 (区域同屏)
+        System = 2,   // 系统 (原队伍)
+        Whisper = 3   // 私聊 (原战队)
     }
 
-    public class ChatMessageItem
+    public class ChatBubbleItem
     {
         public ChatChannel Channel;
-        public string Sender;
+        public string SenderId;
+        public string SenderName;
+        public string TargetId;
         public string TargetName;
         public string Content;
         public string TimeStr;
-        public string FormattedText;
-        public bool IsSelfWhisper;
+        public bool IsSelf;
+        public int Level;
+        public int AvatarIndex;
     }
 
     /// <summary>
-    /// 奥拉星手游风格 空间社交与漫游 HUD
-    /// - 左侧聊天窗口高度占屏幕 2/3
-    /// - 支持一键收放折叠 (含迷你浮条预览与 [C] 快捷键)
-    /// - 包含 [综合 / 广场 / 私聊 / 动作 / 系统] 五大频道切换
-    /// - 支持私聊目标选择与私信双向通信
-    /// - 内置快捷表情 (趣味表情 + 常用社交短语) 抽屉面板
-    /// - 动作快捷栏与轮盘呼出集成
+    /// 奥拉星手游 1:1 风格空间社交聊天界面
+    /// - 左侧垂直频道导航栏：[世界] [附近] [系统] [私聊] (动作分类已移除)
+    /// - 经典气泡聊天布局：左侧显示其他玩家头像与发言，右侧显示本地玩家头像与发言
+    /// - 顶部系统通知跑马灯横幅
+    /// - 底部输入栏：语音图标、白色圆角输入框、黄色表情按钮、亮黄[发送]按钮
+    /// - 占屏 2/3 高度，支持一键收起/展开 (含迷你浮条预览与 [C] 快捷键)
     /// </summary>
     public class DemoHUD : MonoBehaviour
     {
@@ -42,10 +43,13 @@ namespace SmartSpace.UI
         [SerializeField] private int maxHistoryCount = 80;
 
         private bool _isExpanded = true;
-        private ChatChannel _currentChannel = ChatChannel.All;
+        private ChatChannel _currentChannel = ChatChannel.World;
         private string _inputChat = "";
         private Vector2 _scrollPosition = Vector2.zero;
         private bool _shouldScrollToBottom = true;
+
+        // System Marquee Banner Text
+        private string _latestMarqueeNotice = "欢迎来到智慧空间广场！玩家可在露天广场自由漫游、打招呼与社交交互。";
 
         // Whisper (私聊) State
         private string _whisperTargetId = "";
@@ -56,38 +60,46 @@ namespace SmartSpace.UI
         private bool _showQuickEmojiDrawer = false;
         private int _quickDrawerTab = 0; // 0: 表情, 1: 常用语
 
-        private readonly List<ChatMessageItem> _allMessages = new List<ChatMessageItem>();
+        private readonly List<ChatBubbleItem> _messages = new List<ChatBubbleItem>();
 
         // Custom UI Styles & Textures
         private bool _stylesInitialized = false;
-        private GUIStyle _panelStyle;
-        private GUIStyle _headerTitleStyle;
-        private GUIStyle _collapseBtnStyle;
+        private GUIStyle _mainPanelStyle;
         private GUIStyle _tabActiveStyle;
         private GUIStyle _tabInactiveStyle;
-        private GUIStyle _messageStyle;
+        private GUIStyle _marqueeStyle;
+        private GUIStyle _senderNameOtherStyle;
+        private GUIStyle _senderNameSelfStyle;
+        private GUIStyle _bubbleOtherStyle;
+        private GUIStyle _bubbleSelfStyle;
+        private GUIStyle _avatarLevelStyle;
+        private GUIStyle _systemNoticeBoxStyle;
         private GUIStyle _inputFieldStyle;
         private GUIStyle _sendBtnStyle;
-        private GUIStyle _emojiToggleBtnStyle;
-        private GUIStyle _emoteBtnStyle;
-        private GUIStyle _actionBtnStyle;
+        private GUIStyle _emojiRoundBtnStyle;
+        private GUIStyle _iconBtnStyle;
         private GUIStyle _miniBarStyle;
         private GUIStyle _drawerBoxStyle;
         private GUIStyle _drawerItemStyle;
+        private GUIStyle _sideActionBtnStyle;
         private GUIStyle _statusPanelStyle;
         private GUIStyle _statusLabelStyle;
 
-        private Texture2D _texPanelBg;
-        private Texture2D _texHeaderBg;
+        private Texture2D _texMainBg;
         private Texture2D _texTabActive;
         private Texture2D _texTabInactive;
-        private Texture2D _texSendBtn;
-        private Texture2D _texEmojiBtn;
-        private Texture2D _texEmoteBtn;
-        private Texture2D _texEmoteBtnHover;
-        private Texture2D _texInputBg;
-        private Texture2D _texMiniBarBg;
+        private Texture2D _texMarqueeBg;
+        private Texture2D _texBubbleBlue;
+        private Texture2D _texSendBtnYellow;
+        private Texture2D _texInputWhite;
+        private Texture2D _texEmojiDark;
         private Texture2D _texDrawerBg;
+        private Texture2D _texMiniBarBg;
+        private Texture2D _texAvatarBorder;
+
+        // Procedural Avatars
+        private Texture2D _texAvatarSelf;
+        private Texture2D[] _texAvatarOthers;
 
         // Quick Emojis
         private readonly (string label, string text)[] _quickEmojis = new (string, string)[]
@@ -129,13 +141,13 @@ namespace SmartSpace.UI
                 NetworkManager.Instance.OnConnectionStateChanged += HandleConnectionStateChanged;
                 NetworkManager.Instance.OnChatMessageReceived += HandleChatMessage;
                 NetworkManager.Instance.OnWhisperMessageReceived += HandleWhisperMessage;
-                NetworkManager.Instance.OnPlayerEmoteReceived += HandlePlayerEmote;
                 NetworkManager.Instance.OnPlayerJoined += HandlePlayerJoined;
                 NetworkManager.Instance.OnPlayerLeft += HandlePlayerLeft;
             }
 
-            AddSystemMessage("欢迎来到智慧空间广场！已载入奥拉通讯系统。");
-            AddSystemMessage("提示: WASD移动 | T动作轮盘 | C收放窗口 | 支持私聊与快捷表情");
+            // Initial Welcome System Message
+            AddSystemMessage("成功连接至奥拉通讯网络。当前频道已就绪！");
+            AddSystemMessage("操作提示: WASD移动 | T动作轮盘 | C收放聊天窗口");
         }
 
         private void OnDestroy()
@@ -145,7 +157,6 @@ namespace SmartSpace.UI
                 NetworkManager.Instance.OnConnectionStateChanged -= HandleConnectionStateChanged;
                 NetworkManager.Instance.OnChatMessageReceived -= HandleChatMessage;
                 NetworkManager.Instance.OnWhisperMessageReceived -= HandleWhisperMessage;
-                NetworkManager.Instance.OnPlayerEmoteReceived -= HandlePlayerEmote;
                 NetworkManager.Instance.OnPlayerJoined -= HandlePlayerJoined;
                 NetworkManager.Instance.OnPlayerLeft -= HandlePlayerLeft;
             }
@@ -154,7 +165,7 @@ namespace SmartSpace.UI
 
         private void Update()
         {
-            // Toggle Expand/Collapse with 'C' key when not typing
+            // Toggle Expand/Collapse with 'C' key when not focused in input
             if (Input.GetKeyDown(KeyCode.C) && GUI.GetNameOfFocusedControl() != "AolaChatInputField")
             {
                 ToggleExpand();
@@ -170,32 +181,37 @@ namespace SmartSpace.UI
             }
         }
 
-        #region Network Event Handlers
+        #region Network Handlers
 
         private void HandleConnectionStateChanged(bool connected)
         {
             if (connected)
             {
-                AddSystemMessage("成功连接至空间服务器，随时可与同伴交流！");
+                _latestMarqueeNotice = "已成功加入智慧空间中央广场频道！";
+                AddSystemMessage("成功连接至空间服务器，随时可与同伴互动！");
             }
             else
             {
+                _latestMarqueeNotice = "已断开与空间服务器的连接。";
                 AddSystemMessage("<color=#FF5252>已断开与空间服务器的连接。</color>");
             }
         }
 
         private void HandleChatMessage(string senderId, string username, string message)
         {
-            string timeStr = DateTime.Now.ToString("HH:mm");
-            string formatted = $"<color=#78909C>[{timeStr}]</color> <color=#FFD54F><b>[广场]</b></color> <color=#80D8FF><b>{username}</b></color>: {message}";
+            string myId = NetworkManager.Instance != null ? NetworkManager.Instance.SessionId : "";
+            bool isMe = (senderId == myId);
 
-            AddMessage(new ChatMessageItem
+            AddBubbleMessage(new ChatBubbleItem
             {
-                Channel = ChatChannel.Plaza,
-                Sender = username,
+                Channel = ChatChannel.World,
+                SenderId = senderId,
+                SenderName = username,
                 Content = message,
-                TimeStr = timeStr,
-                FormattedText = formatted
+                TimeStr = DateTime.Now.ToString("HH:mm"),
+                IsSelf = isMe,
+                Level = isMe ? 40 : (Math.Abs(senderId.GetHashCode() % 30) + 15),
+                AvatarIndex = Math.Abs(senderId.GetHashCode() % 3)
             });
         }
 
@@ -207,60 +223,28 @@ namespace SmartSpace.UI
 
             if (msg.isError)
             {
-                // System notification of whisper delivery error
-                string errFormatted = $"<color=#78909C>[{timeStr}]</color> <color=#FF5252><b>[私聊提示]</b></color> {msg.message}";
-                AddMessage(new ChatMessageItem
-                {
-                    Channel = ChatChannel.Whisper,
-                    Sender = "系统",
-                    Content = msg.message,
-                    TimeStr = timeStr,
-                    FormattedText = errFormatted
-                });
+                AddSystemMessage($"[私聊提示] {msg.message}");
                 return;
             }
 
-            string formatted;
-            if (isMeSender)
+            if (!isMeSender)
             {
-                // Sent by me
-                formatted = $"<color=#78909C>[{timeStr}]</color> <color=#FF4081><b>[私聊]</b></color> 你对 <b><color=#80D8FF>{msg.targetName}</color></b> 说: {msg.message}";
-            }
-            else
-            {
-                // Sent by someone to me
-                formatted = $"<color=#78909C>[{timeStr}]</color> <color=#FF4081><b>[私聊]</b></color> <b><color=#80D8FF>{msg.senderName}</color></b> 对你说: {msg.message}";
-
-                // Auto memorize whisper partner for quick reply
                 _whisperTargetId = msg.senderId;
                 _whisperTargetName = msg.senderName;
             }
 
-            AddMessage(new ChatMessageItem
+            AddBubbleMessage(new ChatBubbleItem
             {
                 Channel = ChatChannel.Whisper,
-                Sender = msg.senderName,
+                SenderId = msg.senderId,
+                SenderName = msg.senderName,
+                TargetId = msg.targetId,
                 TargetName = msg.targetName,
                 Content = msg.message,
                 TimeStr = timeStr,
-                FormattedText = formatted,
-                IsSelfWhisper = isMeSender
-            });
-        }
-
-        private void HandlePlayerEmote(string senderId, string username, EmoteType emoteType)
-        {
-            string timeStr = DateTime.Now.ToString("HH:mm");
-            string actionText = EmoteHelper.GetChatText(emoteType);
-            string formatted = $"<color=#78909C>[{timeStr}]</color> <color=#00E5FF><b>[动作]</b></color> <color=#80D8FF><b>{username}</b></color> <color=#FFE082>{actionText}</color>";
-
-            AddMessage(new ChatMessageItem
-            {
-                Channel = ChatChannel.Emote,
-                Sender = username,
-                Content = actionText,
-                TimeStr = timeStr,
-                FormattedText = formatted
+                IsSelf = isMeSender,
+                Level = isMeSender ? 40 : (Math.Abs(msg.senderId.GetHashCode() % 30) + 15),
+                AvatarIndex = Math.Abs(msg.senderId.GetHashCode() % 3)
             });
         }
 
@@ -269,7 +253,8 @@ namespace SmartSpace.UI
             string myId = NetworkManager.Instance != null ? NetworkManager.Instance.SessionId : "";
             if (sessionId != myId)
             {
-                AddSystemMessage($"玩家 <color=#80D8FF><b>{username}</b></color> 进入了智慧空间广场！✨");
+                _latestMarqueeNotice = $"热烈欢迎新访客 【{username}】 踏入智慧空间大广场！✨";
+                AddSystemMessage($"玩家 <color=#FFD54F><b>{username}</b></color> 成功进入了智慧空间广场！✨");
             }
         }
 
@@ -285,32 +270,31 @@ namespace SmartSpace.UI
 
         private void AddSystemMessage(string content)
         {
-            string timeStr = DateTime.Now.ToString("HH:mm");
-            string formatted = $"<color=#78909C>[{timeStr}]</color> <color=#76FF03><b>[系统]</b></color> <color=#CFD8DC>{content}</color>";
-
-            AddMessage(new ChatMessageItem
+            AddBubbleMessage(new ChatBubbleItem
             {
                 Channel = ChatChannel.System,
-                Sender = "系统",
+                SenderId = "system",
+                SenderName = "系统通知",
                 Content = content,
-                TimeStr = timeStr,
-                FormattedText = formatted
+                TimeStr = DateTime.Now.ToString("HH:mm"),
+                IsSelf = false,
+                Level = 99
             });
         }
 
-        private void AddMessage(ChatMessageItem item)
+        private void AddBubbleMessage(ChatBubbleItem item)
         {
-            _allMessages.Add(item);
-            if (_allMessages.Count > maxHistoryCount)
+            _messages.Add(item);
+            if (_messages.Count > maxHistoryCount)
             {
-                _allMessages.RemoveAt(0);
+                _messages.RemoveAt(0);
             }
             _shouldScrollToBottom = true;
         }
 
         #endregion
 
-        #region Style & Texture Initialization
+        #region Textures & Styles Initialization
 
         private Texture2D MakeSolidTex(int width, int height, Color col)
         {
@@ -322,64 +306,116 @@ namespace SmartSpace.UI
             return tex;
         }
 
+        private Texture2D MakeBorderedTex(int width, int height, Color fillCol, Color borderCol, int borderWidth)
+        {
+            Texture2D tex = new Texture2D(width, height);
+            Color[] pix = new Color[width * height];
+            for (int y = 0; y < height; y++)
+            {
+                for (int x = 0; x < width; x++)
+                {
+                    bool isBorder = (x < borderWidth || x >= width - borderWidth || y < borderWidth || y >= height - borderWidth);
+                    pix[y * width + x] = isBorder ? borderCol : fillCol;
+                }
+            }
+            tex.SetPixels(pix);
+            tex.Apply();
+            return tex;
+        }
+
+        private Texture2D MakeAvatarTex(Color baseCol, Color accentCol)
+        {
+            int s = 40;
+            Texture2D tex = new Texture2D(s, s);
+            Color[] pix = new Color[s * s];
+            Vector2 c = new Vector2(s * 0.5f, s * 0.5f);
+            float r = s * 0.44f;
+
+            for (int y = 0; y < s; y++)
+            {
+                for (int x = 0; x < s; x++)
+                {
+                    float d = Vector2.Distance(new Vector2(x, y), c);
+                    if (d > r)
+                    {
+                        pix[y * s + x] = new Color(0, 0, 0, 0); // Transparent outside circle
+                    }
+                    else if (d >= r - 2f)
+                    {
+                        pix[y * s + x] = accentCol; // Outer Border
+                    }
+                    else if (d >= r * 0.5f)
+                    {
+                        pix[y * s + x] = baseCol; // Middle gradient
+                    }
+                    else
+                    {
+                        pix[y * s + x] = Color.white; // Cute bright center / eyes
+                    }
+                }
+            }
+            tex.SetPixels(pix);
+            tex.Apply();
+            return tex;
+        }
+
         private void CleanupTextures()
         {
-            if (_texPanelBg != null) Destroy(_texPanelBg);
-            if (_texHeaderBg != null) Destroy(_texHeaderBg);
+            if (_texMainBg != null) Destroy(_texMainBg);
             if (_texTabActive != null) Destroy(_texTabActive);
             if (_texTabInactive != null) Destroy(_texTabInactive);
-            if (_texSendBtn != null) Destroy(_texSendBtn);
-            if (_texEmojiBtn != null) Destroy(_texEmojiBtn);
-            if (_texEmoteBtn != null) Destroy(_texEmoteBtn);
-            if (_texEmoteBtnHover != null) Destroy(_texEmoteBtnHover);
-            if (_texInputBg != null) Destroy(_texInputBg);
-            if (_texMiniBarBg != null) Destroy(_texMiniBarBg);
+            if (_texMarqueeBg != null) Destroy(_texMarqueeBg);
+            if (_texBubbleBlue != null) Destroy(_texBubbleBlue);
+            if (_texSendBtnYellow != null) Destroy(_texSendBtnYellow);
+            if (_texInputWhite != null) Destroy(_texInputWhite);
+            if (_texEmojiDark != null) Destroy(_texEmojiDark);
             if (_texDrawerBg != null) Destroy(_texDrawerBg);
+            if (_texMiniBarBg != null) Destroy(_texMiniBarBg);
+            if (_texAvatarBorder != null) Destroy(_texAvatarBorder);
+            if (_texAvatarSelf != null) Destroy(_texAvatarSelf);
+            if (_texAvatarOthers != null)
+            {
+                foreach (var t in _texAvatarOthers) if (t != null) Destroy(t);
+            }
         }
 
         private void InitStyles()
         {
             if (_stylesInitialized) return;
 
-            _texPanelBg = MakeSolidTex(2, 2, new Color(0.05f, 0.08f, 0.14f, 0.90f));
-            _texHeaderBg = MakeSolidTex(2, 2, new Color(0.08f, 0.13f, 0.22f, 0.95f));
-            _texTabActive = MakeSolidTex(2, 2, new Color(0.0f, 0.55f, 0.85f, 0.92f));
-            _texTabInactive = MakeSolidTex(2, 2, new Color(0.08f, 0.12f, 0.20f, 0.75f));
-            _texSendBtn = MakeSolidTex(2, 2, new Color(0.0f, 0.70f, 0.95f, 0.95f));
-            _texEmojiBtn = MakeSolidTex(2, 2, new Color(0.12f, 0.18f, 0.28f, 0.90f));
-            _texEmoteBtn = MakeSolidTex(2, 2, new Color(0.09f, 0.15f, 0.25f, 0.85f));
-            _texEmoteBtnHover = MakeSolidTex(2, 2, new Color(0.14f, 0.26f, 0.42f, 0.95f));
-            _texInputBg = MakeSolidTex(2, 2, new Color(0.03f, 0.05f, 0.09f, 0.90f));
-            _texMiniBarBg = MakeSolidTex(2, 2, new Color(0.05f, 0.08f, 0.14f, 0.88f));
-            _texDrawerBg = MakeSolidTex(2, 2, new Color(0.07f, 0.11f, 0.18f, 0.98f));
+            // 1. Textures
+            _texMainBg = MakeSolidTex(2, 2, new Color(0.04f, 0.08f, 0.16f, 0.90f));
+            _texTabActive = MakeSolidTex(2, 2, new Color(0.12f, 0.48f, 0.88f, 1.0f)); // Bright Blue from screenshot
+            _texTabInactive = MakeSolidTex(2, 2, new Color(0.08f, 0.14f, 0.24f, 0.85f)); // Dark Slate Blue
+            _texMarqueeBg = MakeSolidTex(2, 2, new Color(0.06f, 0.14f, 0.28f, 0.85f));
+            _texBubbleBlue = MakeBorderedTex(32, 32, new Color(0.08f, 0.44f, 0.82f, 0.96f), new Color(0.12f, 0.54f, 0.95f, 1f), 1);
+            _texSendBtnYellow = MakeSolidTex(2, 2, new Color(1.0f, 0.86f, 0.18f, 1.0f)); // Bright Golden-Yellow from screenshot
+            _texInputWhite = MakeSolidTex(2, 2, new Color(0.93f, 0.95f, 0.97f, 1.0f)); // White Input box from screenshot
+            _texEmojiDark = MakeSolidTex(2, 2, new Color(0.10f, 0.15f, 0.22f, 0.95f));
+            _texDrawerBg = MakeSolidTex(2, 2, new Color(0.07f, 0.12f, 0.20f, 0.98f));
+            _texMiniBarBg = MakeSolidTex(2, 2, new Color(0.05f, 0.09f, 0.16f, 0.90f));
+            _texAvatarBorder = MakeBorderedTex(42, 42, new Color(0.10f, 0.16f, 0.26f, 1f), new Color(0.20f, 0.55f, 0.95f, 1f), 2);
 
-            _panelStyle = new GUIStyle(GUI.skin.box)
+            // Avatars
+            _texAvatarSelf = MakeAvatarTex(new Color(0.0f, 0.65f, 0.95f), new Color(0.4f, 0.85f, 1f));
+            _texAvatarOthers = new Texture2D[]
             {
-                normal = { background = _texPanelBg },
-                padding = new RectOffset(8, 8, 8, 8)
+                MakeAvatarTex(new Color(0.95f, 0.55f, 0.15f), new Color(1f, 0.75f, 0.3f)), // Fox/Pet Orange
+                MakeAvatarTex(new Color(0.85f, 0.25f, 0.35f), new Color(1f, 0.45f, 0.55f)), // Dragon Red
+                MakeAvatarTex(new Color(0.25f, 0.75f, 0.45f), new Color(0.5f, 0.95f, 0.65f))  // Nature Green
             };
 
-            _headerTitleStyle = new GUIStyle(GUI.skin.label)
+            // 2. GUIStyles
+            _mainPanelStyle = new GUIStyle(GUI.skin.box)
             {
-                fontSize = 13,
-                fontStyle = FontStyle.Bold,
-                alignment = TextAnchor.MiddleLeft,
-                richText = true,
-                normal = { textColor = Color.white }
+                normal = { background = _texMainBg },
+                padding = new RectOffset(0, 0, 0, 0)
             };
 
-            _collapseBtnStyle = new GUIStyle(GUI.skin.button)
-            {
-                fontSize = 11,
-                fontStyle = FontStyle.Bold,
-                alignment = TextAnchor.MiddleCenter,
-                normal = { textColor = new Color(0.6f, 0.85f, 1f), background = _texTabInactive },
-                hover = { textColor = Color.white, background = _texEmoteBtnHover }
-            };
-
+            // Vertical Tabs (Left Column)
             _tabActiveStyle = new GUIStyle(GUI.skin.button)
             {
-                fontSize = 12,
+                fontSize = 14,
                 fontStyle = FontStyle.Bold,
                 alignment = TextAnchor.MiddleCenter,
                 normal = { textColor = Color.white, background = _texTabActive }
@@ -387,66 +423,116 @@ namespace SmartSpace.UI
 
             _tabInactiveStyle = new GUIStyle(GUI.skin.button)
             {
-                fontSize = 12,
+                fontSize = 13,
                 alignment = TextAnchor.MiddleCenter,
-                normal = { textColor = new Color(0.7f, 0.8f, 0.9f), background = _texTabInactive },
-                hover = { textColor = Color.white, background = _texEmoteBtnHover }
+                normal = { textColor = new Color(0.48f, 0.68f, 0.88f), background = _texTabInactive },
+                hover = { textColor = Color.white, background = _texTabActive }
             };
 
-            _messageStyle = new GUIStyle(GUI.skin.label)
+            // Marquee Banner (Top of chat area)
+            _marqueeStyle = new GUIStyle(GUI.skin.box)
+            {
+                fontSize = 11,
+                richText = true,
+                alignment = TextAnchor.MiddleLeft,
+                normal = { textColor = Color.white, background = _texMarqueeBg },
+                padding = new RectOffset(6, 6, 2, 2)
+            };
+
+            // Player Names
+            _senderNameOtherStyle = new GUIStyle(GUI.skin.label)
             {
                 fontSize = 12,
-                wordWrap = true,
+                fontStyle = FontStyle.Bold,
+                alignment = TextAnchor.MiddleLeft,
                 richText = true,
-                padding = new RectOffset(2, 2, 2, 2)
+                normal = { textColor = new Color(1.0f, 0.85f, 0.35f) } // Golden-Yellow from screenshot
             };
 
+            _senderNameSelfStyle = new GUIStyle(GUI.skin.label)
+            {
+                fontSize = 12,
+                fontStyle = FontStyle.Bold,
+                alignment = TextAnchor.MiddleRight,
+                richText = true,
+                normal = { textColor = new Color(1.0f, 0.85f, 0.35f) }
+            };
+
+            // Speech Bubbles
+            _bubbleOtherStyle = new GUIStyle(GUI.skin.box)
+            {
+                fontSize = 12,
+                fontStyle = FontStyle.Bold,
+                alignment = TextAnchor.MiddleLeft,
+                wordWrap = true,
+                richText = true,
+                normal = { textColor = Color.white, background = _texBubbleBlue },
+                padding = new RectOffset(10, 10, 6, 6)
+            };
+
+            _bubbleSelfStyle = new GUIStyle(GUI.skin.box)
+            {
+                fontSize = 12,
+                fontStyle = FontStyle.Bold,
+                alignment = TextAnchor.MiddleRight,
+                wordWrap = true,
+                richText = true,
+                normal = { textColor = Color.white, background = _texBubbleBlue },
+                padding = new RectOffset(10, 10, 6, 6)
+            };
+
+            _avatarLevelStyle = new GUIStyle(GUI.skin.label)
+            {
+                fontSize = 10,
+                fontStyle = FontStyle.Bold,
+                alignment = TextAnchor.LowerLeft,
+                normal = { textColor = Color.white }
+            };
+
+            _systemNoticeBoxStyle = new GUIStyle(GUI.skin.box)
+            {
+                fontSize = 11,
+                alignment = TextAnchor.MiddleCenter,
+                richText = true,
+                normal = { textColor = new Color(0.85f, 0.95f, 0.75f), background = _texTabInactive },
+                padding = new RectOffset(8, 8, 4, 4)
+            };
+
+            // Input Bar
             _inputFieldStyle = new GUIStyle(GUI.skin.textField)
             {
                 fontSize = 12,
-                normal = { textColor = Color.white, background = _texInputBg },
-                padding = new RectOffset(6, 6, 4, 4)
+                alignment = TextAnchor.MiddleLeft,
+                normal = { textColor = new Color(0.12f, 0.12f, 0.12f), background = _texInputWhite }, // Dark text on white
+                padding = new RectOffset(8, 8, 4, 4)
             };
 
             _sendBtnStyle = new GUIStyle(GUI.skin.button)
             {
-                fontSize = 12,
+                fontSize = 13,
                 fontStyle = FontStyle.Bold,
                 alignment = TextAnchor.MiddleCenter,
-                normal = { textColor = Color.white, background = _texSendBtn }
+                normal = { textColor = new Color(0.18f, 0.14f, 0.04f), background = _texSendBtnYellow }, // Dark text on Yellow
+                hover = { textColor = Color.black, background = _texSendBtnYellow }
             };
 
-            _emojiToggleBtnStyle = new GUIStyle(GUI.skin.button)
+            _emojiRoundBtnStyle = new GUIStyle(GUI.skin.button)
+            {
+                fontSize = 14,
+                alignment = TextAnchor.MiddleCenter,
+                normal = { textColor = new Color(1.0f, 0.85f, 0.2f), background = _texEmojiDark },
+                hover = { textColor = Color.white, background = _texTabActive }
+            };
+
+            _iconBtnStyle = new GUIStyle(GUI.skin.button)
             {
                 fontSize = 13,
                 alignment = TextAnchor.MiddleCenter,
-                normal = { textColor = new Color(1f, 0.85f, 0.4f), background = _texEmojiBtn },
-                hover = { textColor = Color.white, background = _texEmoteBtnHover }
+                normal = { textColor = new Color(0.0f, 0.85f, 1f), background = _texEmojiDark },
+                hover = { textColor = Color.white, background = _texTabActive }
             };
 
-            _emoteBtnStyle = new GUIStyle(GUI.skin.button)
-            {
-                fontSize = 11,
-                fontStyle = FontStyle.Bold,
-                alignment = TextAnchor.MiddleCenter,
-                normal = { textColor = new Color(0.85f, 0.95f, 1f), background = _texEmoteBtn },
-                hover = { textColor = Color.white, background = _texEmoteBtnHover }
-            };
-
-            _actionBtnStyle = new GUIStyle(GUI.skin.button)
-            {
-                fontSize = 11,
-                alignment = TextAnchor.MiddleCenter,
-                normal = { textColor = new Color(0.75f, 0.9f, 1f), background = _texTabInactive },
-                hover = { textColor = Color.white, background = _texEmoteBtnHover }
-            };
-
-            _miniBarStyle = new GUIStyle(GUI.skin.box)
-            {
-                normal = { background = _texMiniBarBg },
-                padding = new RectOffset(10, 10, 4, 4)
-            };
-
+            // Drawer & Side Buttons
             _drawerBoxStyle = new GUIStyle(GUI.skin.box)
             {
                 normal = { background = _texDrawerBg },
@@ -458,13 +544,29 @@ namespace SmartSpace.UI
                 fontSize = 11,
                 alignment = TextAnchor.MiddleLeft,
                 richText = true,
-                normal = { textColor = new Color(0.9f, 0.95f, 1f), background = _texEmoteBtn },
-                hover = { textColor = Color.white, background = _texEmoteBtnHover }
+                normal = { textColor = new Color(0.9f, 0.95f, 1f), background = _texTabInactive },
+                hover = { textColor = Color.white, background = _texTabActive }
             };
 
+            _sideActionBtnStyle = new GUIStyle(GUI.skin.button)
+            {
+                fontSize = 11,
+                alignment = TextAnchor.MiddleCenter,
+                richText = true,
+                normal = { textColor = new Color(0.65f, 0.85f, 1f), background = _texTabInactive },
+                hover = { textColor = Color.white, background = _texTabActive }
+            };
+
+            _miniBarStyle = new GUIStyle(GUI.skin.box)
+            {
+                normal = { background = _texMiniBarBg },
+                padding = new RectOffset(10, 10, 4, 4)
+            };
+
+            // Status Panel (Top Left)
             _statusPanelStyle = new GUIStyle(GUI.skin.box)
             {
-                normal = { background = _texPanelBg },
+                normal = { background = _texMainBg },
                 padding = new RectOffset(10, 10, 8, 8)
             };
 
@@ -492,7 +594,7 @@ namespace SmartSpace.UI
             // 2. Chat Panel (2/3 Height Expanded OR Mini Collapsed Bar)
             if (_isExpanded)
             {
-                DrawExpandedChatPanel();
+                DrawAolaStarChatWindow();
             }
             else
             {
@@ -510,7 +612,7 @@ namespace SmartSpace.UI
             float statusH = 148f;
             GUILayout.BeginArea(new Rect(16, 16, statusW, statusH), _statusPanelStyle);
 
-            GUILayout.Label("<size=14><b><color=#00E5FF>◆</color> 智慧空间 · 社交漫游系统</b></size>", _headerTitleStyle);
+            GUILayout.Label("<size=14><b><color=#00E5FF>◆</color> 智慧空间 · 社交漫游系统</b></size>", _senderNameOtherStyle);
             GUILayout.Space(2);
 
             string statusColor = isConnected ? "#00E676" : "#FF5252";
@@ -525,50 +627,68 @@ namespace SmartSpace.UI
             GUILayout.EndArea();
         }
 
-        private void DrawExpandedChatPanel()
+        private void DrawAolaStarChatWindow()
         {
-            bool isConnected = NetworkManager.Instance != null && NetworkManager.Instance.IsConnected;
-
-            float panelHeight = Mathf.Max(400f, Screen.height * (2f / 3f));
-            float panelWidth = Mathf.Clamp(Screen.width * 0.28f, 380f, 430f);
+            float panelHeight = Mathf.Max(420f, Screen.height * (2f / 3f));
+            float panelWidth = Mathf.Clamp(Screen.width * 0.32f, 420f, 480f);
             float panelX = 16f;
             float panelY = Screen.height - panelHeight - 16f;
 
-            GUILayout.BeginArea(new Rect(panelX, panelY, panelWidth, panelHeight), _panelStyle);
+            float tabColWidth = 72f;
+            float chatAreaWidth = panelWidth - tabColWidth;
 
-            // A. Top Header Bar
-            GUILayout.BeginHorizontal(GUILayout.Height(28));
-            GUILayout.Label("<size=13><b><color=#00E5FF>💬 空间通讯</color></b> <color=#546E7A>COMMUNICATION</color></size>", _headerTitleStyle);
+            GUILayout.BeginArea(new Rect(panelX, panelY, panelWidth, panelHeight), _mainPanelStyle);
+            GUILayout.BeginHorizontal();
+
+            // -------------------------------------------------------------
+            // A. LEFT VERTICAL CHANNEL TAB BAR (奥拉星左侧频道导航栏)
+            // -------------------------------------------------------------
+            GUILayout.BeginVertical(GUILayout.Width(tabColWidth));
+
+            DrawVerticalChannelTab("世界", ChatChannel.World);
+            DrawVerticalChannelTab("附近", ChatChannel.Nearby);
+            DrawVerticalChannelTab("系统", ChatChannel.System);
+            DrawVerticalChannelTab("私聊", ChatChannel.Whisper);
+
             GUILayout.FlexibleSpace();
-            if (GUILayout.Button("◀ 收起 [C]", _collapseBtnStyle, GUILayout.Width(76), GUILayout.Height(24)))
+
+            // Bottom left utility buttons
+            if (GUILayout.Button("🎡 轮盘", _sideActionBtnStyle, GUILayout.Height(28)))
+            {
+                if (EmoteWheelUI.Instance != null) EmoteWheelUI.Instance.OpenWheel();
+            }
+            if (GUILayout.Button("🤖 访客", _sideActionBtnStyle, GUILayout.Height(28)))
+            {
+                if (NetworkManager.Instance != null && NetworkManager.Instance.IsConnected)
+                {
+                    NetworkManager.Instance.SpawnNetworkBot();
+                }
+            }
+            if (GUILayout.Button("◀ 收起", _sideActionBtnStyle, GUILayout.Height(28)))
             {
                 ToggleExpand();
             }
-            GUILayout.EndHorizontal();
 
-            GUILayout.Space(2);
+            GUILayout.EndVertical();
 
-            // B. Channel Tabs (综合 / 广场 / 私聊 / 动作 / 系统)
-            GUILayout.BeginHorizontal(GUILayout.Height(26));
-            DrawChannelTab("综合", ChatChannel.All);
-            DrawChannelTab("广场", ChatChannel.Plaza);
-            DrawChannelTab("私聊", ChatChannel.Whisper);
-            DrawChannelTab("动作", ChatChannel.Emote);
-            DrawChannelTab("系统", ChatChannel.System);
-            GUILayout.EndHorizontal();
+            // -------------------------------------------------------------
+            // B. RIGHT CHAT CONTENT COLUMN (右侧主聊天显示与输入区)
+            // -------------------------------------------------------------
+            GUILayout.BeginVertical(GUILayout.Width(chatAreaWidth));
 
-            // C. Whisper Target Bar (Visible when in Whisper tab or target is selected)
-            if (_currentChannel == ChatChannel.Whisper || !string.IsNullOrEmpty(_whisperTargetId))
+            // B1. Top Marquee Banner (顶部跑马灯横幅)
+            DrawMarqueeBanner();
+
+            // B2. Whisper Target Selector (Only shown in Whisper channel)
+            if (_currentChannel == ChatChannel.Whisper)
             {
                 DrawWhisperTargetBar();
             }
 
-            GUILayout.Space(3);
-
-            // D. Scrollable Message List
-            float reservedBottomHeight = 78f + 32f + 16f;
-            float scrollH = panelHeight - 90f - reservedBottomHeight;
-            if (scrollH < 100f) scrollH = 100f;
+            // B3. Scrollable Bubble Messages Area
+            float bottomReservedH = 46f + (_showQuickEmojiDrawer ? 100f : 0f);
+            float scrollH = panelHeight - 34f - bottomReservedH - (_currentChannel == ChatChannel.Whisper ? 28f : 0f);
+            if (scrollH < 120f) scrollH = 120f;
 
             _scrollPosition = GUILayout.BeginScrollView(
                 _scrollPosition,
@@ -580,25 +700,32 @@ namespace SmartSpace.UI
             int displayedCount = 0;
             string myId = NetworkManager.Instance != null ? NetworkManager.Instance.SessionId : "";
 
-            foreach (var item in _allMessages)
+            foreach (var msg in _messages)
             {
-                bool show = false;
-                if (_currentChannel == ChatChannel.All)
+                bool shouldShow = false;
+                if (_currentChannel == ChatChannel.World || _currentChannel == ChatChannel.Nearby)
                 {
-                    show = true;
+                    shouldShow = (msg.Channel == ChatChannel.World || msg.Channel == ChatChannel.Nearby);
+                }
+                else if (_currentChannel == ChatChannel.System)
+                {
+                    shouldShow = (msg.Channel == ChatChannel.System);
                 }
                 else if (_currentChannel == ChatChannel.Whisper)
                 {
-                    show = (item.Channel == ChatChannel.Whisper);
-                }
-                else
-                {
-                    show = (item.Channel == _currentChannel);
+                    shouldShow = (msg.Channel == ChatChannel.Whisper);
                 }
 
-                if (show)
+                if (shouldShow)
                 {
-                    GUILayout.Label(item.FormattedText, _messageStyle);
+                    if (msg.Channel == ChatChannel.System)
+                    {
+                        DrawSystemNoticeBubble(msg);
+                    }
+                    else
+                    {
+                        DrawPlayerChatBubble(msg);
+                    }
                     displayedCount++;
                 }
             }
@@ -607,12 +734,11 @@ namespace SmartSpace.UI
             {
                 string emptyHint = _currentChannel switch
                 {
-                    ChatChannel.Whisper => "<color=#78909C>暂无私聊消息。点击下方选择玩家发起私聊...</color>",
-                    ChatChannel.Plaza => "<color=#78909C>暂无公屏聊天，发一条和大家问好吧~</color>",
-                    ChatChannel.Emote => "<color=#78909C>暂无动作记录，试试快捷动作打招呼！</color>",
-                    _ => "<color=#78909C>当前频道暂无消息记录...</color>"
+                    ChatChannel.Whisper => "<color=#78909C>暂无私聊消息。点击上方选择玩家发起私聊...</color>",
+                    ChatChannel.System => "<color=#78909C>暂无系统公告记录。</color>",
+                    _ => "<color=#78909C>暂无发言记录，快在下方输入与大家打招呼吧！</color>"
                 };
-                GUILayout.Label(emptyHint, _messageStyle);
+                GUILayout.Label(emptyHint, _marqueeStyle);
             }
 
             if (_shouldScrollToBottom)
@@ -623,101 +749,126 @@ namespace SmartSpace.UI
 
             GUILayout.EndScrollView();
 
-            GUILayout.Space(3);
-
-            // E. Interactive Bottom Bar: Quick Emoji Drawer OR Quick Body Emote Buttons
+            // B4. Quick Emoji & Phrases Drawer (if opened)
             if (_showQuickEmojiDrawer)
             {
                 DrawQuickEmojiDrawer();
             }
-            else
-            {
-                GUILayout.BeginVertical();
-                GUILayout.BeginHorizontal();
-                if (GUILayout.Button("👋 挥手 [1]", _emoteBtnStyle, GUILayout.Height(22))) TriggerLocalEmote(EmoteType.Wave);
-                if (GUILayout.Button("💖 比心 [2]", _emoteBtnStyle, GUILayout.Height(22))) TriggerLocalEmote(EmoteType.Heart);
-                if (GUILayout.Button("👏 鼓掌 [3]", _emoteBtnStyle, GUILayout.Height(22))) TriggerLocalEmote(EmoteType.Clap);
-                GUILayout.EndHorizontal();
 
-                GUILayout.BeginHorizontal();
-                if (GUILayout.Button("🙇 鞠躬 [4]", _emoteBtnStyle, GUILayout.Height(22))) TriggerLocalEmote(EmoteType.Bow);
-                if (GUILayout.Button("🕺 跳舞 [5]", _emoteBtnStyle, GUILayout.Height(22))) TriggerLocalEmote(EmoteType.Dance);
-                if (GUILayout.Button("✋ 击掌 [6]", _emoteBtnStyle, GUILayout.Height(22))) TriggerLocalEmote(EmoteType.HighFive);
-                GUILayout.EndHorizontal();
+            // B5. Bottom Input Bar (1:1 奥拉星输入栏)
+            DrawBottomInputBar();
 
-                GUILayout.BeginHorizontal();
-                if (GUILayout.Button("🎡 动作轮盘 (Hold T)", _actionBtnStyle, GUILayout.Height(21)))
-                {
-                    if (EmoteWheelUI.Instance != null) EmoteWheelUI.Instance.OpenWheel();
-                }
-                if (GUILayout.Button("🤖 召唤访客 (Bot)", _actionBtnStyle, GUILayout.Height(21)))
-                {
-                    if (NetworkManager.Instance != null && isConnected) NetworkManager.Instance.SpawnNetworkBot();
-                }
-                GUILayout.EndHorizontal();
-                GUILayout.EndVertical();
-            }
+            GUILayout.EndVertical();
 
-            GUILayout.Space(3);
-
-            // G. Input Bar with Emoji Toggle & Send Button
-            GUILayout.BeginHorizontal(GUILayout.Height(28));
-
-            // Emoji Drawer Toggle Button
-            string emojiToggleText = _showQuickEmojiDrawer ? "▲" : "😀";
-            if (GUILayout.Button(emojiToggleText, _emojiToggleBtnStyle, GUILayout.Width(30), GUILayout.Height(26)))
-            {
-                _showQuickEmojiDrawer = !_showQuickEmojiDrawer;
-            }
-
-            // Input Field
-            GUI.SetNextControlName("AolaChatInputField");
-            _inputChat = GUILayout.TextField(_inputChat, _inputFieldStyle, GUILayout.Height(26));
-
-            bool pressEnter = Event.current.isKey && Event.current.keyCode == KeyCode.Return && GUI.GetNameOfFocusedControl() == "AolaChatInputField";
-            if ((GUILayout.Button("发送", _sendBtnStyle, GUILayout.Width(52), GUILayout.Height(26)) || pressEnter)
-                && !string.IsNullOrEmpty(_inputChat.Trim()))
-            {
-                SendMessageContent(_inputChat.Trim());
-                _inputChat = "";
-                GUI.FocusControl(null);
-            }
             GUILayout.EndHorizontal();
-
             GUILayout.EndArea();
 
             // Player Selection Dropdown Overlay (if open)
             if (_showPlayerSelectDropdown)
             {
-                DrawPlayerSelectDropdown(panelX, panelY, panelWidth);
+                DrawPlayerSelectDropdown(panelX + tabColWidth, panelY, chatAreaWidth);
             }
         }
 
-        private void DrawChannelTab(string name, ChatChannel channel)
+        private void DrawVerticalChannelTab(string label, ChatChannel channel)
         {
             bool isActive = (_currentChannel == channel);
             GUIStyle style = isActive ? _tabActiveStyle : _tabInactiveStyle;
-            string label = isActive ? $"<b><color=#FFFFFF>[{name}]</color></b>" : $"<color=#90A4AE>{name}</color>";
-
-            if (GUILayout.Button(label, style, GUILayout.Height(24)))
+            if (GUILayout.Button(label, style, GUILayout.Height(52)))
             {
                 _currentChannel = channel;
                 _shouldScrollToBottom = true;
             }
         }
 
+        private void DrawMarqueeBanner()
+        {
+            GUILayout.BeginHorizontal(_marqueeStyle, GUILayout.Height(26));
+            GUILayout.Label($"📢 <color=#00E5FF><b>系统通知:</b></color> <color=#FFE082>{_latestMarqueeNotice}</color>", _marqueeStyle);
+            GUILayout.EndHorizontal();
+        }
+
+        private void DrawPlayerChatBubble(ChatBubbleItem msg)
+        {
+            GUILayout.Space(6);
+
+            Texture2D avatarTex = msg.IsSelf ? _texAvatarSelf : _texAvatarOthers[msg.AvatarIndex % _texAvatarOthers.Length];
+
+            if (!msg.IsSelf)
+            {
+                // ---------------------------------------------------------
+                // OTHER PLAYERS: Left Avatar + Golden Name + Blue Bubble
+                // ---------------------------------------------------------
+                GUILayout.BeginHorizontal();
+
+                // Avatar Box with Level
+                Rect avatarRect = GUILayoutUtility.GetRect(42, 42, GUILayout.Width(42), GUILayout.Height(42));
+                GUI.DrawTexture(avatarRect, _texAvatarBorder);
+                GUI.DrawTexture(new Rect(avatarRect.x + 2, avatarRect.y + 2, 38, 38), avatarTex);
+                GUI.Label(new Rect(avatarRect.x + 4, avatarRect.y + 24, 20, 16), $"{msg.Level}", _avatarLevelStyle);
+
+                GUILayout.Space(6);
+
+                // Content Column (Name above Bubble)
+                GUILayout.BeginVertical();
+                GUILayout.Label(msg.SenderName, _senderNameOtherStyle);
+                GUILayout.Space(2);
+                GUILayout.Label(msg.Content, _bubbleOtherStyle, GUILayout.MaxWidth(250));
+                GUILayout.EndVertical();
+
+                GUILayout.FlexibleSpace();
+                GUILayout.EndHorizontal();
+            }
+            else
+            {
+                // ---------------------------------------------------------
+                // LOCAL PLAYER (SELF): Blue Bubble + Golden Name + Right Avatar
+                // ---------------------------------------------------------
+                GUILayout.BeginHorizontal();
+                GUILayout.FlexibleSpace();
+
+                // Content Column (Name above Bubble, Right-aligned)
+                GUILayout.BeginVertical();
+                string targetPrefix = (!string.IsNullOrEmpty(msg.TargetName)) ? $"对 <color=#80D8FF>{msg.TargetName}</color> 说" : msg.SenderName;
+                GUILayout.Label(targetPrefix, _senderNameSelfStyle);
+                GUILayout.Space(2);
+                GUILayout.Label(msg.Content, _bubbleSelfStyle, GUILayout.MaxWidth(250));
+                GUILayout.EndVertical();
+
+                GUILayout.Space(6);
+
+                // Avatar Box with Level
+                Rect avatarRect = GUILayoutUtility.GetRect(42, 42, GUILayout.Width(42), GUILayout.Height(42));
+                GUI.DrawTexture(avatarRect, _texAvatarBorder);
+                GUI.DrawTexture(new Rect(avatarRect.x + 2, avatarRect.y + 2, 38, 38), avatarTex);
+                GUI.Label(new Rect(avatarRect.x + 4, avatarRect.y + 24, 20, 16), $"{msg.Level}", _avatarLevelStyle);
+
+                GUILayout.EndHorizontal();
+            }
+        }
+
+        private void DrawSystemNoticeBubble(ChatBubbleItem msg)
+        {
+            GUILayout.Space(4);
+            GUILayout.BeginHorizontal();
+            GUILayout.FlexibleSpace();
+            GUILayout.Label($"<color=#76FF03><b>[系统]</b></color> {msg.Content}", _systemNoticeBoxStyle, GUILayout.MaxWidth(320));
+            GUILayout.FlexibleSpace();
+            GUILayout.EndHorizontal();
+        }
+
         private void DrawWhisperTargetBar()
         {
-            GUILayout.BeginHorizontal(GUI.skin.box, GUILayout.Height(24));
+            GUILayout.BeginHorizontal(_marqueeStyle, GUILayout.Height(24));
             if (!string.IsNullOrEmpty(_whisperTargetId))
             {
-                GUILayout.Label($"<color=#FF4081><b>[密语]</b></color> 目标: <b><color=#80D8FF>{_whisperTargetName}</color></b>", _messageStyle);
+                GUILayout.Label($"<color=#FF4081><b>[密语]</b></color> 目标: <b><color=#80D8FF>{_whisperTargetName}</color></b>", _marqueeStyle);
                 GUILayout.FlexibleSpace();
-                if (GUILayout.Button("更换", _actionBtnStyle, GUILayout.Width(44), GUILayout.Height(20)))
+                if (GUILayout.Button("更换", _sideActionBtnStyle, GUILayout.Width(44), GUILayout.Height(20)))
                 {
                     _showPlayerSelectDropdown = !_showPlayerSelectDropdown;
                 }
-                if (GUILayout.Button("✕", _actionBtnStyle, GUILayout.Width(22), GUILayout.Height(20)))
+                if (GUILayout.Button("✕", _sideActionBtnStyle, GUILayout.Width(22), GUILayout.Height(20)))
                 {
                     _whisperTargetId = "";
                     _whisperTargetName = "";
@@ -726,9 +877,9 @@ namespace SmartSpace.UI
             }
             else
             {
-                GUILayout.Label("<color=#FF4081><b>[密语]</b></color> <color=#90A4AE>未指定目标，点击右侧选择玩家:</color>", _messageStyle);
+                GUILayout.Label("<color=#FF4081><b>[密语]</b></color> <color=#90A4AE>未指定目标，点击选择玩家:</color>", _marqueeStyle);
                 GUILayout.FlexibleSpace();
-                if (GUILayout.Button("选择玩家 ▼", _actionBtnStyle, GUILayout.Width(80), GUILayout.Height(20)))
+                if (GUILayout.Button("选择玩家 ▼", _sideActionBtnStyle, GUILayout.Width(80), GUILayout.Height(20)))
                 {
                     _showPlayerSelectDropdown = !_showPlayerSelectDropdown;
                 }
@@ -736,65 +887,51 @@ namespace SmartSpace.UI
             GUILayout.EndHorizontal();
         }
 
-        private void DrawPlayerSelectDropdown(float panelX, float panelY, float panelWidth)
+        private void DrawBottomInputBar()
         {
-            float dropW = 220f;
-            float dropH = 160f;
-            float dropX = panelX + 70f;
-            float dropY = panelY + 60f;
+            bool isConnected = NetworkManager.Instance != null && NetworkManager.Instance.IsConnected;
 
-            Rect dropRect = new Rect(dropX, dropY, dropW, dropH);
-            GUILayout.BeginArea(dropRect, _drawerBoxStyle);
+            GUILayout.BeginHorizontal(GUILayout.Height(34));
 
-            GUILayout.BeginHorizontal();
-            GUILayout.Label("<color=#00E5FF><b>在线玩家列表</b></color>", _headerTitleStyle);
-            GUILayout.FlexibleSpace();
-            if (GUILayout.Button("✕", _actionBtnStyle, GUILayout.Width(22), GUILayout.Height(20)))
+            // 1. Left Voice/Action Icon Button
+            if (GUILayout.Button("🎙️", _iconBtnStyle, GUILayout.Width(34), GUILayout.Height(32)))
             {
-                _showPlayerSelectDropdown = false;
+                if (EmoteWheelUI.Instance != null) EmoteWheelUI.Instance.OpenWheel();
             }
+
+            GUILayout.Space(4);
+
+            // 2. White Rounded Input Field
+            GUI.SetNextControlName("AolaChatInputField");
+            _inputChat = GUILayout.TextField(_inputChat, _inputFieldStyle, GUILayout.Height(32));
+
+            GUILayout.Space(4);
+
+            // 3. Yellow Smiley Emoji Button
+            string emojiSymbol = _showQuickEmojiDrawer ? "▲" : "😊";
+            if (GUILayout.Button(emojiSymbol, _emojiRoundBtnStyle, GUILayout.Width(34), GUILayout.Height(32)))
+            {
+                _showQuickEmojiDrawer = !_showQuickEmojiDrawer;
+            }
+
+            GUILayout.Space(4);
+
+            // 4. Vibrant Golden-Yellow Send Button
+            bool pressEnter = Event.current.isKey && Event.current.keyCode == KeyCode.Return && GUI.GetNameOfFocusedControl() == "AolaChatInputField";
+            if ((GUILayout.Button("发 送", _sendBtnStyle, GUILayout.Width(68), GUILayout.Height(32)) || pressEnter)
+                && !string.IsNullOrEmpty(_inputChat.Trim()))
+            {
+                SendMessageContent(_inputChat.Trim());
+                _inputChat = "";
+                GUI.FocusControl(null);
+            }
+
             GUILayout.EndHorizontal();
-
-            GUILayout.Space(2);
-
-            string myId = NetworkManager.Instance != null ? NetworkManager.Instance.SessionId : "";
-            var onlineMap = NetworkManager.Instance != null ? NetworkManager.Instance.OnlinePlayers : null;
-
-            int count = 0;
-            if (onlineMap != null)
-            {
-                foreach (var kvp in onlineMap)
-                {
-                    if (kvp.Key == myId) continue; // Skip self
-
-                    if (GUILayout.Button($"👤 {kvp.Value}", _drawerItemStyle, GUILayout.Height(24)))
-                    {
-                        _whisperTargetId = kvp.Key;
-                        _whisperTargetName = kvp.Value;
-                        _showPlayerSelectDropdown = false;
-                        _currentChannel = ChatChannel.Whisper;
-                    }
-                    count++;
-                }
-            }
-
-            if (count == 0)
-            {
-                GUILayout.Label("<color=#90A4AE>暂无其他在线玩家\n可点击[召唤访客]测试</color>", _messageStyle);
-            }
-
-            GUILayout.EndArea();
-
-            // Click outside closes dropdown
-            if (Event.current.type == EventType.MouseDown && !dropRect.Contains(Event.current.mousePosition))
-            {
-                _showPlayerSelectDropdown = false;
-            }
         }
 
         private void DrawQuickEmojiDrawer()
         {
-            GUILayout.BeginVertical(_drawerBoxStyle, GUILayout.Height(100));
+            GUILayout.BeginVertical(_drawerBoxStyle, GUILayout.Height(96));
 
             // Drawer Header with Sub-tabs
             GUILayout.BeginHorizontal(GUILayout.Height(20));
@@ -805,7 +942,7 @@ namespace SmartSpace.UI
             if (GUILayout.Button("💬 常用短语", tab1Style, GUILayout.Width(85), GUILayout.Height(20))) _quickDrawerTab = 1;
 
             GUILayout.FlexibleSpace();
-            if (GUILayout.Button("✕", _actionBtnStyle, GUILayout.Width(22), GUILayout.Height(18)))
+            if (GUILayout.Button("✕", _sideActionBtnStyle, GUILayout.Width(22), GUILayout.Height(18)))
             {
                 _showQuickEmojiDrawer = false;
             }
@@ -861,12 +998,66 @@ namespace SmartSpace.UI
             GUILayout.EndVertical();
         }
 
+        private void DrawPlayerSelectDropdown(float panelX, float panelY, float panelWidth)
+        {
+            float dropW = 210f;
+            float dropH = 150f;
+            float dropX = panelX + 30f;
+            float dropY = panelY + 60f;
+
+            Rect dropRect = new Rect(dropX, dropY, dropW, dropH);
+            GUILayout.BeginArea(dropRect, _drawerBoxStyle);
+
+            GUILayout.BeginHorizontal();
+            GUILayout.Label("<color=#00E5FF><b>在线玩家列表</b></color>", _senderNameOtherStyle);
+            GUILayout.FlexibleSpace();
+            if (GUILayout.Button("✕", _sideActionBtnStyle, GUILayout.Width(22), GUILayout.Height(20)))
+            {
+                _showPlayerSelectDropdown = false;
+            }
+            GUILayout.EndHorizontal();
+
+            GUILayout.Space(2);
+
+            string myId = NetworkManager.Instance != null ? NetworkManager.Instance.SessionId : "";
+            var onlineMap = NetworkManager.Instance != null ? NetworkManager.Instance.OnlinePlayers : null;
+
+            int count = 0;
+            if (onlineMap != null)
+            {
+                foreach (var kvp in onlineMap)
+                {
+                    if (kvp.Key == myId) continue;
+
+                    if (GUILayout.Button($"👤 {kvp.Value}", _drawerItemStyle, GUILayout.Height(24)))
+                    {
+                        _whisperTargetId = kvp.Key;
+                        _whisperTargetName = kvp.Value;
+                        _showPlayerSelectDropdown = false;
+                        _currentChannel = ChatChannel.Whisper;
+                    }
+                    count++;
+                }
+            }
+
+            if (count == 0)
+            {
+                GUILayout.Label("<color=#90A4AE>暂无其他在线玩家\n可点击左侧[访客]测试</color>", _marqueeStyle);
+            }
+
+            GUILayout.EndArea();
+
+            if (Event.current.type == EventType.MouseDown && !dropRect.Contains(Event.current.mousePosition))
+            {
+                _showPlayerSelectDropdown = false;
+            }
+        }
+
         private void SendMessageContent(string content)
         {
             if (NetworkManager.Instance == null || !NetworkManager.Instance.IsConnected) return;
 
-            // If in Whisper channel and a target is selected, send as Whisper
-            if (_currentChannel == ChatChannel.Whisper || !string.IsNullOrEmpty(_whisperTargetId))
+            if (_currentChannel == ChatChannel.Whisper)
             {
                 if (string.IsNullOrEmpty(_whisperTargetId))
                 {
@@ -879,31 +1070,30 @@ namespace SmartSpace.UI
             }
             else
             {
-                // Send as public Plaza chat
                 NetworkManager.Instance.SendChat(content);
             }
         }
 
         private void DrawCollapsedMiniBar()
         {
-            float barW = Mathf.Clamp(Screen.width * 0.28f, 380f, 430f);
+            float barW = Mathf.Clamp(Screen.width * 0.32f, 420f, 480f);
             float barH = 42f;
             float barX = 16f;
             float barY = Screen.height - barH - 16f;
 
             string previewText = "<color=#90A4AE>暂无新消息，点击展开交流...</color>";
-            if (_allMessages.Count > 0)
+            if (_messages.Count > 0)
             {
-                var latest = _allMessages[_allMessages.Count - 1];
+                var latest = _messages[_messages.Count - 1];
                 string chTag = latest.Channel switch
                 {
-                    ChatChannel.Plaza => "<color=#FFD54F>[广场]</color>",
+                    ChatChannel.World => "<color=#1E88E5>[世界]</color>",
+                    ChatChannel.Nearby => "<color=#00E5FF>[附近]</color>",
                     ChatChannel.Whisper => "<color=#FF4081>[私聊]</color>",
-                    ChatChannel.Emote => "<color=#00E5FF>[动作]</color>",
                     ChatChannel.System => "<color=#76FF03>[系统]</color>",
-                    _ => "<color=#00E5FF>[综合]</color>"
+                    _ => "<color=#00E5FF>[世界]</color>"
                 };
-                string sender = !string.IsNullOrEmpty(latest.Sender) ? $"<b>{latest.Sender}</b>: " : "";
+                string sender = !string.IsNullOrEmpty(latest.SenderName) ? $"<b>{latest.SenderName}</b>: " : "";
                 previewText = $"{chTag} {sender}{latest.Content}";
             }
 
@@ -911,10 +1101,10 @@ namespace SmartSpace.UI
             GUILayout.BeginArea(barRect, _miniBarStyle);
             GUILayout.BeginHorizontal();
 
-            GUILayout.Label($"<size=12>💬 {previewText}</size>", _messageStyle, GUILayout.Height(28), GUILayout.MaxWidth(barW - 85));
+            GUILayout.Label($"<size=12>💬 {previewText}</size>", _marqueeStyle, GUILayout.Height(28), GUILayout.MaxWidth(barW - 85));
             GUILayout.FlexibleSpace();
 
-            if (GUILayout.Button("展开 ▶", _collapseBtnStyle, GUILayout.Width(66), GUILayout.Height(24)))
+            if (GUILayout.Button("展开 ▶", _tabActiveStyle, GUILayout.Width(66), GUILayout.Height(24)))
             {
                 ToggleExpand();
             }
@@ -930,21 +1120,5 @@ namespace SmartSpace.UI
         }
 
         #endregion
-
-        private void TriggerLocalEmote(EmoteType type)
-        {
-            if (EmoteWheelUI.Instance != null)
-            {
-                EmoteWheelUI.Instance.TriggerEmote(type);
-            }
-            else
-            {
-                var local = FindObjectOfType<LocalPlayerController>();
-                if (local != null)
-                {
-                    local.TriggerEmote((sbyte)type);
-                }
-            }
-        }
     }
 }
