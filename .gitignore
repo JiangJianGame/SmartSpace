@@ -104,3 +104,15 @@ InitTestScene*.unity*
 
 # Auto-generated cache in Assets folder
 /[Aa]ssets/[Ss]ceneDependencyCache*
+
+# Node / Colyseus Server
+**/node_modules/
+**/dist/
+Server/node_modules/
+Server/dist/
+npm-debug.log*
+
+# Editor captures & screenshots
+/[Aa]ssets/[Ss]creenshots/
+/[Aa]ssets/[Ss]creenshots.meta
+
