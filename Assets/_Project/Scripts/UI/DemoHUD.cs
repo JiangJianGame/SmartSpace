@@ -71,6 +71,8 @@ namespace SmartSpace.UI
         private GUIStyle _bubbleSelfStyle;
         private GUIStyle _avatarLevelStyle;
         private GUIStyle _systemNoticeBoxStyle;
+        private GUIStyle _systemTagStyle;
+        private GUIStyle _systemContentStyle;
         private GUIStyle _inputFieldStyle;
         private GUIStyle _sendBtnStyle;
         private GUIStyle _emojiRoundBtnStyle;
@@ -482,11 +484,29 @@ namespace SmartSpace.UI
 
             _systemNoticeBoxStyle = new GUIStyle(GUI.skin.box)
             {
+                normal = { background = _texTabInactive },
+                padding = new RectOffset(10, 10, 6, 6),
+                margin = new RectOffset(0, 0, 2, 2)
+            };
+
+            _systemTagStyle = new GUIStyle(GUI.skin.label)
+            {
                 fontSize = 11,
-                alignment = TextAnchor.MiddleCenter,
+                fontStyle = FontStyle.Bold,
                 richText = true,
-                normal = { textColor = new Color(0.85f, 0.95f, 0.75f), background = _texTabInactive },
-                padding = new RectOffset(8, 8, 4, 4)
+                alignment = TextAnchor.MiddleLeft,
+                normal = { textColor = new Color(0.46f, 1.0f, 0.01f) }, // Vibrant Green #76FF03
+                padding = new RectOffset(0, 0, 0, 0)
+            };
+
+            _systemContentStyle = new GUIStyle(GUI.skin.label)
+            {
+                fontSize = 12,
+                richText = true,
+                wordWrap = true,
+                alignment = TextAnchor.MiddleLeft,
+                normal = { textColor = new Color(0.90f, 0.95f, 1.0f) },
+                padding = new RectOffset(0, 0, 0, 0)
             };
 
             // Input Bar
@@ -494,6 +514,8 @@ namespace SmartSpace.UI
             {
                 fontSize = 12,
                 alignment = TextAnchor.MiddleLeft,
+                clipping = TextClipping.Clip,
+                wordWrap = false,
                 normal = { textColor = new Color(0.12f, 0.12f, 0.12f), background = _texInputWhite }, // Dark text on white
                 padding = new RectOffset(8, 8, 4, 4)
             };
@@ -695,11 +717,11 @@ namespace SmartSpace.UI
                 {
                     if (msg.Channel == ChatChannel.System)
                     {
-                        DrawSystemNoticeBubble(msg);
+                        DrawSystemNoticeBubble(msg, chatAreaWidth);
                     }
                     else
                     {
-                        DrawPlayerChatBubble(msg);
+                        DrawPlayerChatBubble(msg, chatAreaWidth);
                     }
                     displayedCount++;
                 }
@@ -730,8 +752,8 @@ namespace SmartSpace.UI
                 DrawQuickEmojiDrawer();
             }
 
-            // B5. Bottom Input Bar (1:1 奥拉星输入栏)
-            DrawBottomInputBar();
+            // B5. Bottom Input Bar (1:1 奥拉星输入栏，固定输入宽度防止向右挤压)
+            DrawBottomInputBar(chatAreaWidth);
 
             GUILayout.EndVertical();
 
@@ -800,11 +822,12 @@ namespace SmartSpace.UI
             GUILayout.EndHorizontal();
         }
 
-        private void DrawPlayerChatBubble(ChatBubbleItem msg)
+        private void DrawPlayerChatBubble(ChatBubbleItem msg, float contentWidth)
         {
             GUILayout.Space(6);
 
             Texture2D avatarTex = msg.IsSelf ? _texAvatarSelf : _texAvatarOthers[msg.AvatarIndex % _texAvatarOthers.Length];
+            float maxBubbleW = Mathf.Clamp(contentWidth - 110f, 180f, 260f);
 
             if (!msg.IsSelf)
             {
@@ -825,7 +848,7 @@ namespace SmartSpace.UI
                 GUILayout.BeginVertical();
                 GUILayout.Label(msg.SenderName, _senderNameOtherStyle);
                 GUILayout.Space(2);
-                GUILayout.Label(msg.Content, _bubbleOtherStyle, GUILayout.MaxWidth(250));
+                GUILayout.Label(msg.Content, _bubbleOtherStyle, GUILayout.MaxWidth(maxBubbleW));
                 GUILayout.EndVertical();
 
                 GUILayout.FlexibleSpace();
@@ -844,7 +867,7 @@ namespace SmartSpace.UI
                 string targetPrefix = (!string.IsNullOrEmpty(msg.TargetName)) ? $"对 <color=#80D8FF>{msg.TargetName}</color> 说" : msg.SenderName;
                 GUILayout.Label(targetPrefix, _senderNameSelfStyle);
                 GUILayout.Space(2);
-                GUILayout.Label(msg.Content, _bubbleSelfStyle, GUILayout.MaxWidth(250));
+                GUILayout.Label(msg.Content, _bubbleSelfStyle, GUILayout.MaxWidth(maxBubbleW));
                 GUILayout.EndVertical();
 
                 GUILayout.Space(6);
@@ -859,13 +882,31 @@ namespace SmartSpace.UI
             }
         }
 
-        private void DrawSystemNoticeBubble(ChatBubbleItem msg)
+        private void DrawSystemNoticeBubble(ChatBubbleItem msg, float contentWidth)
         {
-            GUILayout.Space(4);
+            GUILayout.Space(3);
+            float cardWidth = Mathf.Max(240f, contentWidth - 28f);
+
             GUILayout.BeginHorizontal();
+            GUILayout.Space(4);
+
+            GUILayout.BeginVertical(_systemNoticeBoxStyle, GUILayout.Width(cardWidth));
+
+            // Top Row: System Tag + Timestamp
+            GUILayout.BeginHorizontal();
+            GUILayout.Label("📢 <b>[系统通知]</b>", _systemTagStyle, GUILayout.Height(18));
             GUILayout.FlexibleSpace();
-            GUILayout.Label($"<color=#76FF03><b>[系统]</b></color> {msg.Content}", _systemNoticeBoxStyle, GUILayout.MaxWidth(320));
-            GUILayout.FlexibleSpace();
+            GUILayout.Label($"<color=#90A4AE><size=10>{msg.TimeStr}</size></color>", _avatarLevelStyle, GUILayout.Height(18));
+            GUILayout.EndHorizontal();
+
+            GUILayout.Space(2);
+
+            // Content body: neatly word-wrapped with fixed width
+            GUILayout.Label(msg.Content, _systemContentStyle, GUILayout.Width(cardWidth - 20f));
+
+            GUILayout.EndVertical();
+
+            GUILayout.Space(4);
             GUILayout.EndHorizontal();
         }
 
@@ -899,10 +940,8 @@ namespace SmartSpace.UI
             GUILayout.EndHorizontal();
         }
 
-        private void DrawBottomInputBar()
+        private void DrawBottomInputBar(float contentWidth)
         {
-            bool isConnected = NetworkManager.Instance != null && NetworkManager.Instance.IsConnected;
-
             GUILayout.BeginHorizontal(GUILayout.Height(34));
 
             // 1. Left Voice/Action Icon Button
@@ -913,9 +952,10 @@ namespace SmartSpace.UI
 
             GUILayout.Space(4);
 
-            // 2. White Rounded Input Field
+            // 2. White Rounded Input Field (Strictly fixed width so it NEVER expands or overflows)
+            float inputW = Mathf.Max(120f, contentWidth - 156f);
             GUI.SetNextControlName("AolaChatInputField");
-            _inputChat = GUILayout.TextField(_inputChat, _inputFieldStyle, GUILayout.Height(32));
+            _inputChat = GUILayout.TextField(_inputChat, 100, _inputFieldStyle, GUILayout.Width(inputW), GUILayout.Height(32));
 
             GUILayout.Space(4);
 
@@ -929,8 +969,8 @@ namespace SmartSpace.UI
             GUILayout.Space(4);
 
             // 4. Vibrant Golden-Yellow Send Button
-            bool pressEnter = Event.current.isKey && Event.current.keyCode == KeyCode.Return && GUI.GetNameOfFocusedControl() == "AolaChatInputField";
-            if ((GUILayout.Button("发 送", _sendBtnStyle, GUILayout.Width(68), GUILayout.Height(32)) || pressEnter)
+            bool pressEnter = Event.current.type == EventType.KeyDown && Event.current.keyCode == KeyCode.Return && GUI.GetNameOfFocusedControl() == "AolaChatInputField";
+            if ((GUILayout.Button("发 送", _sendBtnStyle, GUILayout.Width(64), GUILayout.Height(32)) || pressEnter)
                 && !string.IsNullOrEmpty(_inputChat.Trim()))
             {
                 SendMessageContent(_inputChat.Trim());
