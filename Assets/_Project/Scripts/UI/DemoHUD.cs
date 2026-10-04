@@ -708,12 +708,12 @@ namespace SmartSpace.UI
             float chatAreaWidth = panelWidth - tabColWidth;
 
             GUILayout.BeginArea(new Rect(panelX, panelY, panelWidth, panelHeight), _mainPanelStyle);
-            GUILayout.BeginHorizontal();
 
             // -------------------------------------------------------------
             // A. LEFT VERTICAL CHANNEL TAB BAR (奥拉星左侧频道导航栏)
             // -------------------------------------------------------------
-            GUILayout.BeginVertical(GUILayout.Width(tabColWidth));
+            GUILayout.BeginArea(new Rect(0, 0, tabColWidth, panelHeight));
+            GUILayout.BeginVertical();
 
             DrawVerticalChannelTab("世界", ChatChannel.World);
             DrawVerticalChannelTab("附近", ChatChannel.Nearby);
@@ -721,33 +721,32 @@ namespace SmartSpace.UI
             DrawVerticalChannelTab("私聊", ChatChannel.Whisper);
 
             GUILayout.FlexibleSpace();
-
             GUILayout.EndVertical();
+            GUILayout.EndArea();
 
             // -------------------------------------------------------------
-            // B. RIGHT CHAT CONTENT COLUMN (右侧主聊天显示与输入区)
+            // B. RIGHT CHAT CONTENT AREAS (顶部栏 / 消息滚动区 / 底部输入栏)
+            // 采用绝对分层锚定，彻底杜绝流式布局累积误差，确保输入框在任何频道下位置绝对一致！
             // -------------------------------------------------------------
-            GUILayout.BeginVertical(GUILayout.Width(chatAreaWidth));
-
-            // B1. Top Header Bar (右上角操作按钮: 轮盘 / 访客 / 收起)
-            DrawTopHeaderBar();
-
-            // B2. Whisper Target Selector (仅私聊频道显示)
-            if (_currentChannel == ChatChannel.Whisper)
-            {
-                DrawWhisperTargetBar();
-            }
-
-            // B3. Scrollable Bubble Messages Area
-            float topHeaderH = 32f + (_currentChannel == ChatChannel.Whisper ? 28f : 0f);
-            float bottomReservedH = 66f + (_showQuickEmojiDrawer ? 100f : 0f);
+            float topHeaderH = 32f;
+            float drawerH = _showQuickEmojiDrawer ? 96f : 0f;
+            float inputBarH = 54f;
+            float bottomReservedH = inputBarH + drawerH + 6f;
             float scrollH = panelHeight - topHeaderH - bottomReservedH;
-            if (scrollH < 120f) scrollH = 120f;
+            if (scrollH < 100f) scrollH = 100f;
 
+            // B1. Top Header Bar (高度严格固定 32px，私聊目标与快捷操作同层并列)
+            GUILayout.BeginArea(new Rect(tabColWidth, 0, chatAreaWidth, topHeaderH));
+            DrawTopHeaderBar();
+            GUILayout.EndArea();
+
+            // B2. Scrollable Bubble Messages Area (高度严格限定在顶部栏与底部栏之间)
+            GUILayout.BeginArea(new Rect(tabColWidth, topHeaderH, chatAreaWidth, scrollH));
             _scrollPosition = GUILayout.BeginScrollView(
                 _scrollPosition,
                 false,
                 true,
+                GUILayout.Width(chatAreaWidth),
                 GUILayout.Height(scrollH)
             );
 
@@ -788,7 +787,7 @@ namespace SmartSpace.UI
             {
                 string emptyHint = _currentChannel switch
                 {
-                    ChatChannel.Whisper => "<color=#78909C>暂无私聊消息。点击上方选择玩家发起私聊...</color>",
+                    ChatChannel.Whisper => "<color=#78909C>暂无私聊消息。点击上方[选择目标]发起私聊...</color>",
                     ChatChannel.System => "<color=#78909C>暂无系统公告记录。</color>",
                     _ => "<color=#78909C>暂无发言记录，快在下方输入与大家打招呼吧！</color>"
                 };
@@ -802,20 +801,27 @@ namespace SmartSpace.UI
             }
 
             GUILayout.EndScrollView();
+            GUILayout.EndArea();
 
-            // B4. Quick Emoji & Phrases Drawer (if opened)
+            // B3. Bottom Input Area (严格锚定在面板底部，输入框在任何频道下 Y 坐标绝对锁定！)
+            float bottomAreaY = panelHeight - bottomReservedH;
+            GUILayout.BeginArea(new Rect(tabColWidth, bottomAreaY, chatAreaWidth, bottomReservedH));
+            GUILayout.BeginVertical();
+
+            // Quick Emoji & Phrases Drawer (if opened)
             if (_showQuickEmojiDrawer)
             {
                 DrawQuickEmojiDrawer();
+                GUILayout.Space(2);
             }
 
-            // B5. Bottom Input Bar (从一开始就固定舒适高度，初始即完整容纳多行长文本)
+            // Bottom Input Bar
             DrawBottomInputBar(chatAreaWidth);
 
             GUILayout.EndVertical();
-
-            GUILayout.EndHorizontal();
             GUILayout.EndArea();
+
+            GUILayout.EndArea(); // Close panel main area
 
             // Player Selection Dropdown Overlay (if open)
             if (_showPlayerSelectDropdown)
@@ -838,29 +844,58 @@ namespace SmartSpace.UI
         private void DrawTopHeaderBar()
         {
             GUILayout.BeginHorizontal(GUILayout.Height(28));
-            GUILayout.Space(2);
+            GUILayout.Space(4);
 
-            string channelTitle = _currentChannel switch
+            if (_currentChannel == ChatChannel.Whisper)
             {
-                ChatChannel.World => "<color=#1E88E5><b>● 世界频道</b></color>",
-                ChatChannel.Nearby => "<color=#00E5FF><b>● 附近频道</b></color>",
-                ChatChannel.System => "<color=#76FF03><b>● 系统公告</b></color>",
-                ChatChannel.Whisper => "<color=#FF4081><b>● 私聊密语</b></color>",
-                _ => "<color=#80D8FF><b>● 综合</b></color>"
-            };
-            GUILayout.Label(channelTitle, _senderNameOtherStyle, GUILayout.Height(24));
+                GUILayout.Label("<color=#FF4081><b>● 私聊</b></color>", _senderNameOtherStyle, GUILayout.Height(24));
+                GUILayout.Space(4);
+
+                if (!string.IsNullOrEmpty(_whisperTargetId))
+                {
+                    string targetBtnText = $"对: <color=#80D8FF><b>{_whisperTargetName}</b></color> ▼";
+                    if (GUILayout.Button(targetBtnText, _sideActionBtnStyle, GUILayout.Height(22)))
+                    {
+                        _showPlayerSelectDropdown = !_showPlayerSelectDropdown;
+                    }
+                    if (GUILayout.Button("✕", _sideActionBtnStyle, GUILayout.Width(20), GUILayout.Height(22)))
+                    {
+                        _whisperTargetId = "";
+                        _whisperTargetName = "";
+                        _showPlayerSelectDropdown = false;
+                    }
+                }
+                else
+                {
+                    if (GUILayout.Button("选择目标 ▼", _sideActionBtnStyle, GUILayout.Height(22)))
+                    {
+                        _showPlayerSelectDropdown = !_showPlayerSelectDropdown;
+                    }
+                }
+            }
+            else
+            {
+                string channelTitle = _currentChannel switch
+                {
+                    ChatChannel.World => "<color=#1E88E5><b>● 世界频道</b></color>",
+                    ChatChannel.Nearby => "<color=#00E5FF><b>● 附近频道</b></color>",
+                    ChatChannel.System => "<color=#76FF03><b>● 系统公告</b></color>",
+                    _ => "<color=#80D8FF><b>● 综合</b></color>"
+                };
+                GUILayout.Label(channelTitle, _senderNameOtherStyle, GUILayout.Height(24));
+            }
 
             GUILayout.FlexibleSpace();
 
             // 右上角操作按钮: 轮盘 / 访客 / 收起
-            if (GUILayout.Button("🎡 轮盘", _sideActionBtnStyle, GUILayout.Width(62), GUILayout.Height(24)))
+            if (GUILayout.Button("🎡 轮盘", _sideActionBtnStyle, GUILayout.Width(58), GUILayout.Height(24)))
             {
                 if (EmoteWheelUI.Instance != null) EmoteWheelUI.Instance.OpenWheel();
             }
 
             GUILayout.Space(4);
 
-            if (GUILayout.Button("🤖 访客", _sideActionBtnStyle, GUILayout.Width(62), GUILayout.Height(24)))
+            if (GUILayout.Button("🤖 访客", _sideActionBtnStyle, GUILayout.Width(58), GUILayout.Height(24)))
             {
                 if (NetworkManager.Instance != null && NetworkManager.Instance.IsConnected)
                 {
@@ -870,7 +905,7 @@ namespace SmartSpace.UI
 
             GUILayout.Space(4);
 
-            if (GUILayout.Button("◀ 收起", _sideActionBtnStyle, GUILayout.Width(58), GUILayout.Height(24)))
+            if (GUILayout.Button("◀ 收起", _sideActionBtnStyle, GUILayout.Width(54), GUILayout.Height(24)))
             {
                 ToggleExpand();
             }
@@ -967,39 +1002,9 @@ namespace SmartSpace.UI
             GUILayout.EndHorizontal();
         }
 
-        private void DrawWhisperTargetBar()
-        {
-            GUILayout.BeginHorizontal(_marqueeStyle, GUILayout.Height(24));
-            if (!string.IsNullOrEmpty(_whisperTargetId))
-            {
-                GUILayout.Label($"<color=#FF4081><b>[密语]</b></color> 目标: <b><color=#80D8FF>{_whisperTargetName}</color></b>", _marqueeStyle);
-                GUILayout.FlexibleSpace();
-                if (GUILayout.Button("更换", _sideActionBtnStyle, GUILayout.Width(44), GUILayout.Height(20)))
-                {
-                    _showPlayerSelectDropdown = !_showPlayerSelectDropdown;
-                }
-                if (GUILayout.Button("✕", _sideActionBtnStyle, GUILayout.Width(22), GUILayout.Height(20)))
-                {
-                    _whisperTargetId = "";
-                    _whisperTargetName = "";
-                    _showPlayerSelectDropdown = false;
-                }
-            }
-            else
-            {
-                GUILayout.Label("<color=#FF4081><b>[密语]</b></color> <color=#90A4AE>未指定目标，点击选择玩家:</color>", _marqueeStyle);
-                GUILayout.FlexibleSpace();
-                if (GUILayout.Button("选择玩家 ▼", _sideActionBtnStyle, GUILayout.Width(80), GUILayout.Height(20)))
-                {
-                    _showPlayerSelectDropdown = !_showPlayerSelectDropdown;
-                }
-            }
-            GUILayout.EndHorizontal();
-        }
-
         private void DrawBottomInputBar(float contentWidth)
         {
-            float inputBarH = 52f;
+            float inputBarH = 50f;
             float rightBtnsW = 36f + 4f + 68f + 8f; // Emoji(36) + Sp(4) + Send(68) + Margins(8) = 116f
             float inputW = Mathf.Max(180f, contentWidth - rightBtnsW);
 
@@ -1021,14 +1026,19 @@ namespace SmartSpace.UI
                 }
             }
 
-            // 1. White Rounded Input Box (一开始即固定为 52px 舒适高度，完美容纳2~3行长文本且绝不抖动)
+            // 1. White Rounded Input Box (固定舒适高度，绝对锁定位置，绝不抖动)
             GUI.SetNextControlName("AolaChatInputField");
             Rect inputRect = GUILayoutUtility.GetRect(inputW, inputBarH, GUILayout.Width(inputW), GUILayout.Height(inputBarH));
             _inputChat = GUI.TextArea(inputRect, _inputChat, 120, _inputFieldStyle);
 
             if (string.IsNullOrEmpty(_inputChat) && !isFocused)
             {
-                GUI.Label(new Rect(inputRect.x + 8, inputRect.y + 7, inputRect.width - 16, 20), "点击输入...", _placeholderStyle);
+                string hint = "点击输入...";
+                if (_currentChannel == ChatChannel.Whisper)
+                {
+                    hint = string.IsNullOrEmpty(_whisperTargetId) ? "点击输入 (请先在顶部选择目标)..." : $"对 [{_whisperTargetName}] 说...";
+                }
+                GUI.Label(new Rect(inputRect.x + 8, inputRect.y + 7, inputRect.width - 16, 20), hint, _placeholderStyle);
             }
 
             GUILayout.Space(4);
@@ -1137,7 +1147,7 @@ namespace SmartSpace.UI
             float dropW = 210f;
             float dropH = 150f;
             float dropX = panelX + 30f;
-            float dropY = panelY + 60f;
+            float dropY = panelY + 34f;
 
             Rect dropRect = new Rect(dropX, dropY, dropW, dropH);
             GUILayout.BeginArea(dropRect, _drawerBoxStyle);
