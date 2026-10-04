@@ -83,6 +83,7 @@ namespace SmartSpace.UI
         private GUIStyle _sideActionBtnStyle;
         private GUIStyle _statusPanelStyle;
         private GUIStyle _statusLabelStyle;
+        private GUIStyle _placeholderStyle;
 
         private Texture2D _texMainBg;
         private Texture2D _texTabActive;
@@ -94,6 +95,7 @@ namespace SmartSpace.UI
         private Texture2D _texDrawerBg;
         private Texture2D _texMiniBarBg;
         private Texture2D _texAvatarBorder;
+        private Texture2D _texSmileyIcon;
 
         // Procedural Avatars
         private Texture2D _texAvatarSelf;
@@ -354,6 +356,51 @@ namespace SmartSpace.UI
             return tex;
         }
 
+        private Texture2D MakeSmileyTex(int size)
+        {
+            Texture2D tex = new Texture2D(size, size, TextureFormat.RGBA32, false);
+            Color[] pix = new Color[size * size];
+            float r = size * 0.5f;
+            Vector2 center = new Vector2(r, r);
+            Color yellow = new Color(1.0f, 0.86f, 0.16f, 1f);
+            Color black = new Color(0.12f, 0.12f, 0.12f, 1f);
+
+            for (int y = 0; y < size; y++)
+            {
+                for (int x = 0; x < size; x++)
+                {
+                    float d = Vector2.Distance(new Vector2(x, y), center);
+                    if (d > r)
+                    {
+                        pix[y * size + x] = Color.clear;
+                    }
+                    else if (d >= r - 1.5f)
+                    {
+                        pix[y * size + x] = new Color(0.85f, 0.70f, 0.10f, 1f);
+                    }
+                    else
+                    {
+                        float leftEye = Vector2.Distance(new Vector2(x, y), new Vector2(size * 0.35f, size * 0.60f));
+                        float rightEye = Vector2.Distance(new Vector2(x, y), new Vector2(size * 0.65f, size * 0.60f));
+                        float mouthCenter = Vector2.Distance(new Vector2(x, y), new Vector2(size * 0.5f, size * 0.45f));
+                        bool isMouth = (mouthCenter >= size * 0.18f && mouthCenter <= size * 0.27f && y < size * 0.42f && x >= size * 0.26f && x <= size * 0.74f);
+
+                        if (leftEye < size * 0.09f || rightEye < size * 0.09f || isMouth)
+                        {
+                            pix[y * size + x] = black;
+                        }
+                        else
+                        {
+                            pix[y * size + x] = yellow;
+                        }
+                    }
+                }
+            }
+            tex.SetPixels(pix);
+            tex.Apply();
+            return tex;
+        }
+
         private void CleanupTextures()
         {
             if (_texMainBg != null) Destroy(_texMainBg);
@@ -367,6 +414,7 @@ namespace SmartSpace.UI
             if (_texMiniBarBg != null) Destroy(_texMiniBarBg);
             if (_texAvatarBorder != null) Destroy(_texAvatarBorder);
             if (_texAvatarSelf != null) Destroy(_texAvatarSelf);
+            if (_texSmileyIcon != null) Destroy(_texSmileyIcon);
             if (_texAvatarOthers != null)
             {
                 foreach (var t in _texAvatarOthers) if (t != null) Destroy(t);
@@ -388,6 +436,7 @@ namespace SmartSpace.UI
             _texDrawerBg = MakeSolidTex(2, 2, new Color(0.07f, 0.12f, 0.20f, 0.98f));
             _texMiniBarBg = MakeSolidTex(2, 2, new Color(0.05f, 0.09f, 0.16f, 0.90f));
             _texAvatarBorder = MakeBorderedTex(42, 42, new Color(0.10f, 0.16f, 0.26f, 1f), new Color(0.20f, 0.55f, 0.95f, 1f), 2);
+            _texSmileyIcon = MakeSmileyTex(34);
 
             // Avatars
             _texAvatarSelf = MakeAvatarTex(new Color(0.0f, 0.65f, 0.95f), new Color(0.4f, 0.85f, 1f));
@@ -510,14 +559,22 @@ namespace SmartSpace.UI
             };
 
             // Input Bar
-            _inputFieldStyle = new GUIStyle(GUI.skin.textField)
+            _inputFieldStyle = new GUIStyle(GUI.skin.textArea)
             {
                 fontSize = 12,
                 alignment = TextAnchor.MiddleLeft,
-                clipping = TextClipping.Clip,
-                wordWrap = false,
+                wordWrap = true,
                 normal = { textColor = new Color(0.12f, 0.12f, 0.12f), background = _texInputWhite }, // Dark text on white
                 padding = new RectOffset(8, 8, 4, 4)
+            };
+
+            _placeholderStyle = new GUIStyle(GUI.skin.label)
+            {
+                fontSize = 12,
+                alignment = TextAnchor.MiddleLeft,
+                richText = true,
+                normal = { textColor = new Color(0.58f, 0.62f, 0.68f) },
+                padding = new RectOffset(0, 0, 0, 0)
             };
 
             _sendBtnStyle = new GUIStyle(GUI.skin.button)
@@ -531,10 +588,10 @@ namespace SmartSpace.UI
 
             _emojiRoundBtnStyle = new GUIStyle(GUI.skin.button)
             {
-                fontSize = 14,
                 alignment = TextAnchor.MiddleCenter,
-                normal = { textColor = new Color(1.0f, 0.85f, 0.2f), background = _texEmojiDark },
-                hover = { textColor = Color.white, background = _texTabActive }
+                padding = new RectOffset(2, 2, 2, 2),
+                normal = { background = _texEmojiDark },
+                hover = { background = _texTabActive }
             };
 
             _iconBtnStyle = new GUIStyle(GUI.skin.button)
@@ -643,7 +700,7 @@ namespace SmartSpace.UI
         private void DrawAolaStarChatWindow()
         {
             float panelHeight = Mathf.Max(420f, Screen.height * (2f / 3f));
-            float panelWidth = Mathf.Clamp(Screen.width * 0.32f, 420f, 480f);
+            float panelWidth = Mathf.Clamp(Screen.width * 0.35f, 450f, 520f);
             float panelX = 16f;
             float panelY = Screen.height - panelHeight - 16f;
 
@@ -683,7 +740,7 @@ namespace SmartSpace.UI
 
             // B3. Scrollable Bubble Messages Area
             float topHeaderH = 32f + (_currentChannel == ChatChannel.Whisper ? 28f : 0f);
-            float bottomReservedH = 46f + (_showQuickEmojiDrawer ? 100f : 0f);
+            float bottomReservedH = 50f + (_showQuickEmojiDrawer ? 100f : 0f);
             float scrollH = panelHeight - topHeaderH - bottomReservedH;
             if (scrollH < 120f) scrollH = 120f;
 
@@ -942,35 +999,49 @@ namespace SmartSpace.UI
 
         private void DrawBottomInputBar(float contentWidth)
         {
+            float rightBtnsW = 34f + 4f + 66f + 8f; // Emoji(34) + Sp(4) + Send(66) + Margins(8) = 112f
+            float inputW = Mathf.Max(180f, contentWidth - rightBtnsW);
+
             GUILayout.BeginHorizontal(GUILayout.Height(34));
 
-            // 1. Left Voice/Action Icon Button
-            if (GUILayout.Button("🎙️", _iconBtnStyle, GUILayout.Width(34), GUILayout.Height(32)))
+            // Intercept Enter key for sending before TextArea inserts a newline
+            Event e = Event.current;
+            bool isFocused = (GUI.GetNameOfFocusedControl() == "AolaChatInputField");
+            bool pressEnter = (e.type == EventType.KeyDown && (e.keyCode == KeyCode.Return || e.keyCode == KeyCode.KeypadEnter) && isFocused);
+
+            if (pressEnter)
             {
-                if (EmoteWheelUI.Instance != null) EmoteWheelUI.Instance.OpenWheel();
+                e.Use();
+                if (!string.IsNullOrEmpty(_inputChat.Trim()))
+                {
+                    SendMessageContent(_inputChat.Trim());
+                    _inputChat = "";
+                    GUI.FocusControl(null);
+                }
+            }
+
+            // 1. White Rounded Input Box (TextArea with wordWrap to show FULL text without truncation)
+            GUI.SetNextControlName("AolaChatInputField");
+            Rect inputRect = GUILayoutUtility.GetRect(inputW, 34f, GUILayout.Width(inputW), GUILayout.Height(34f));
+            _inputChat = GUI.TextArea(inputRect, _inputChat, 120, _inputFieldStyle);
+
+            if (string.IsNullOrEmpty(_inputChat) && !isFocused)
+            {
+                GUI.Label(new Rect(inputRect.x + 8, inputRect.y + 8, inputRect.width - 16, 20), "点击输入...", _placeholderStyle);
             }
 
             GUILayout.Space(4);
 
-            // 2. White Rounded Input Field (Strictly fixed width so it NEVER expands or overflows)
-            float inputW = Mathf.Max(120f, contentWidth - 156f);
-            GUI.SetNextControlName("AolaChatInputField");
-            _inputChat = GUILayout.TextField(_inputChat, 100, _inputFieldStyle, GUILayout.Width(inputW), GUILayout.Height(32));
-
-            GUILayout.Space(4);
-
-            // 3. Yellow Smiley Emoji Button
-            string emojiSymbol = _showQuickEmojiDrawer ? "▲" : "😊";
-            if (GUILayout.Button(emojiSymbol, _emojiRoundBtnStyle, GUILayout.Width(34), GUILayout.Height(32)))
+            // 2. Yellow Smiley Emoji Button (1:1 Procedural Icon matching reference image)
+            if (GUI.Button(GUILayoutUtility.GetRect(34, 34, GUILayout.Width(34), GUILayout.Height(34)), _texSmileyIcon, _emojiRoundBtnStyle))
             {
                 _showQuickEmojiDrawer = !_showQuickEmojiDrawer;
             }
 
             GUILayout.Space(4);
 
-            // 4. Vibrant Golden-Yellow Send Button
-            bool pressEnter = Event.current.type == EventType.KeyDown && Event.current.keyCode == KeyCode.Return && GUI.GetNameOfFocusedControl() == "AolaChatInputField";
-            if ((GUILayout.Button("发 送", _sendBtnStyle, GUILayout.Width(64), GUILayout.Height(32)) || pressEnter)
+            // 3. Vibrant Golden-Yellow Send Button
+            if (GUILayout.Button("发 送", _sendBtnStyle, GUILayout.Width(66), GUILayout.Height(34))
                 && !string.IsNullOrEmpty(_inputChat.Trim()))
             {
                 SendMessageContent(_inputChat.Trim());
