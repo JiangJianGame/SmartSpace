@@ -30,6 +30,7 @@ namespace SmartSpace.Network
     {
         public string senderId;
         public string username;
+        public sbyte avatarId;
         public string message;
         public double timestamp;
     }
@@ -46,11 +47,34 @@ namespace SmartSpace.Network
     {
         public string senderId;
         public string senderName;
+        public sbyte senderAvatarId;
         public string targetId;
         public string targetName;
+        public sbyte targetAvatarId;
         public string message;
         public bool isError;
         public double timestamp;
+    }
+
+    [Serializable]
+    public class ProfileUpdateBroadcast
+    {
+        public string sessionId;
+        public string username;
+        public sbyte avatarId;
+        public string gender;
+        public sbyte age;
+        public string bio;
+    }
+
+    [Serializable]
+    public class UpdateProfilePayload
+    {
+        public string username;
+        public int avatarId;
+        public string gender;
+        public int age;
+        public string bio;
     }
 
     [Serializable]
@@ -81,6 +105,9 @@ namespace SmartSpace.Network
         private static readonly List<NativeWebSocket.WebSocket> _activeWebSockets = new List<NativeWebSocket.WebSocket>();
 
         public readonly Dictionary<string, string> OnlinePlayers = new Dictionary<string, string>();
+        public readonly Dictionary<string, UserProfile> OnlineProfiles = new Dictionary<string, UserProfile>();
+
+        public UserProfile LocalProfile { get; set; }
 
         public bool IsConnected => _room != null;
         public string SessionId => _room != null ? _room.SessionId : "";
@@ -88,10 +115,12 @@ namespace SmartSpace.Network
 
         public event Action<bool> OnConnectionStateChanged;
         public event Action<string, string, string> OnChatMessageReceived; // senderId, username, message
+        public event Action<string, string, int, string> OnChatMessageWithAvatarReceived; // senderId, username, avatarId, message
         public event Action<WhisperMessageBroadcast> OnWhisperMessageReceived;
         public event Action<string, string, EmoteType> OnPlayerEmoteReceived; // senderId, username, emoteType
         public event Action<string, string> OnPlayerJoined; // sessionId, username
         public event Action<string> OnPlayerLeft; // sessionId
+        public event Action<string, UserProfile> OnPlayerProfileChanged; // sessionId, profile
 
         private void Awake()
         {
@@ -101,6 +130,8 @@ namespace SmartSpace.Network
                 return;
             }
             Instance = this;
+
+            LocalProfile = UserProfile.LoadFromPrefs();
 
             ColyseusContext.RegisterWebSocketForDispatch = (ws) =>
             {
@@ -126,7 +157,11 @@ namespace SmartSpace.Network
         {
             if (autoConnect)
             {
-                Connect("Player_" + UnityEngine.Random.Range(1000, 9999));
+                // If user has already saved profile, connect immediately. Otherwise UI will show setup dialog first.
+                if (UserProfile.HasSavedProfile())
+                {
+                    Connect(LocalProfile);
+                }
             }
         }
 
@@ -143,22 +178,45 @@ namespace SmartSpace.Network
 #endif
         }
 
-        public async void Connect(string username)
+        public void Connect(string username)
+        {
+            if (LocalProfile == null) LocalProfile = UserProfile.LoadFromPrefs();
+            LocalProfile.username = username;
+            Connect(LocalProfile);
+        }
+
+        public async void Connect(UserProfile profile = null)
         {
             if (IsConnected) return;
 
+            if (profile != null)
+            {
+                LocalProfile = profile;
+            }
+            else if (LocalProfile == null)
+            {
+                LocalProfile = UserProfile.LoadFromPrefs();
+            }
+
             try
             {
-                Debug.Log($"[NetworkManager] Connecting to {serverUrl}...");
+                Debug.Log($"[NetworkManager] Connecting to {serverUrl} with profile '{LocalProfile.username}' (Avatar:{LocalProfile.avatarId})...");
                 _client = new Client(serverUrl);
 
                 var options = new Dictionary<string, object>
                 {
-                    { "username", username }
+                    { "username", LocalProfile.username },
+                    { "avatarId", LocalProfile.avatarId },
+                    { "gender", LocalProfile.gender },
+                    { "age", LocalProfile.age },
+                    { "bio", LocalProfile.bio }
                 };
 
                 _room = await _client.JoinOrCreate<PlazaState>(roomName, options);
                 Debug.Log($"[NetworkManager] Successfully joined room: {_room.Name} with SessionId: {_room.SessionId}");
+
+                OnlinePlayers[_room.SessionId] = LocalProfile.username;
+                OnlineProfiles[_room.SessionId] = LocalProfile;
 
                 OnConnectionStateChanged?.Invoke(true);
 
@@ -176,6 +234,7 @@ namespace SmartSpace.Network
                 {
                     Debug.Log($"[Chat] {chatMsg.username}: {chatMsg.message}");
                     OnChatMessageReceived?.Invoke(chatMsg.senderId, chatMsg.username, chatMsg.message);
+                    OnChatMessageWithAvatarReceived?.Invoke(chatMsg.senderId, chatMsg.username, chatMsg.avatarId, chatMsg.message);
                 });
 
                 // Register whisper / private chat message
@@ -183,6 +242,43 @@ namespace SmartSpace.Network
                 {
                     Debug.Log($"[Whisper] {whisperMsg.senderName} -> {whisperMsg.targetName}: {whisperMsg.message}");
                     OnWhisperMessageReceived?.Invoke(whisperMsg);
+                });
+
+                // Register profile update broadcast
+                _room.OnMessage<ProfileUpdateBroadcast>("playerProfileUpdated", (pMsg) =>
+                {
+                    Debug.Log($"[Profile] Updated for {pMsg.sessionId}: {pMsg.username} (Avatar:{pMsg.avatarId})");
+
+                    if (!OnlineProfiles.TryGetValue(pMsg.sessionId, out var prof))
+                    {
+                        prof = new UserProfile();
+                        OnlineProfiles[pMsg.sessionId] = prof;
+                    }
+                    prof.username = pMsg.username;
+                    prof.avatarId = pMsg.avatarId;
+                    prof.gender = pMsg.gender;
+                    prof.age = pMsg.age;
+                    prof.bio = pMsg.bio;
+
+                    OnlinePlayers[pMsg.sessionId] = pMsg.username;
+
+                    if (pMsg.sessionId == _room.SessionId)
+                    {
+                        LocalProfile.username = pMsg.username;
+                        LocalProfile.avatarId = pMsg.avatarId;
+                        LocalProfile.gender = pMsg.gender;
+                        LocalProfile.age = pMsg.age;
+                        LocalProfile.bio = pMsg.bio;
+                        LocalProfile.SaveToPrefs();
+
+                        if (_spawnedPlayers.TryGetValue(pMsg.sessionId, out GameObject localObj))
+                        {
+                            var localCtrl = localObj.GetComponent<LocalPlayerController>();
+                            if (localCtrl != null) localCtrl.SetProfile(pMsg.username, pMsg.avatarId);
+                        }
+                    }
+
+                    OnPlayerProfileChanged?.Invoke(pMsg.sessionId, prof);
                 });
 
                 // Register player emote message
@@ -210,14 +306,33 @@ namespace SmartSpace.Network
                 // When a player is added
                 callbacks.OnAdd(state => state.players, (key, player) =>
                 {
-                    Debug.Log($"[NetworkManager] Player added: {key} ({player.username})");
+                    Debug.Log($"[NetworkManager] Player added: {key} ({player.username}, Avatar:{player.avatarId})");
                     OnlinePlayers[key] = player.username;
+                    OnlineProfiles[key] = new UserProfile
+                    {
+                        username = player.username,
+                        avatarId = player.avatarId,
+                        gender = player.gender,
+                        age = player.age,
+                        bio = player.bio
+                    };
+
                     SpawnPlayer(key, player);
                     OnPlayerJoined?.Invoke(key, player.username);
 
                     // Track changes on this player
                     callbacks.OnChange(player, () =>
                     {
+                        if (OnlineProfiles.TryGetValue(key, out var p))
+                        {
+                            p.username = player.username;
+                            p.avatarId = player.avatarId;
+                            p.gender = player.gender;
+                            p.age = player.age;
+                            p.bio = player.bio;
+                        }
+                        OnlinePlayers[key] = player.username;
+
                         if (_spawnedPlayers.TryGetValue(key, out GameObject playerObj))
                         {
                             var remote = playerObj.GetComponent<RemotePlayerController>();
@@ -226,6 +341,8 @@ namespace SmartSpace.Network
                                 remote.UpdateFromSchema(player);
                             }
                         }
+
+                        OnPlayerProfileChanged?.Invoke(key, OnlineProfiles[key]);
                     });
                 });
 
@@ -234,6 +351,7 @@ namespace SmartSpace.Network
                 {
                     Debug.Log($"[NetworkManager] Player removed: {key}");
                     OnlinePlayers.Remove(key);
+                    OnlineProfiles.Remove(key);
                     OnPlayerLeft?.Invoke(key);
                     DespawnPlayer(key);
                 });
@@ -242,6 +360,37 @@ namespace SmartSpace.Network
             {
                 Debug.LogError($"[NetworkManager] Failed to connect to server: {ex.Message}");
                 OnConnectionStateChanged?.Invoke(false);
+            }
+        }
+
+        public void UpdateProfile(UserProfile newProfile)
+        {
+            if (newProfile == null) return;
+            LocalProfile = newProfile;
+            LocalProfile.SaveToPrefs();
+
+            if (IsConnected)
+            {
+                OnlineProfiles[SessionId] = LocalProfile;
+                OnlinePlayers[SessionId] = LocalProfile.username;
+
+                if (_spawnedPlayers.TryGetValue(SessionId, out GameObject localObj))
+                {
+                    var localCtrl = localObj.GetComponent<LocalPlayerController>();
+                    if (localCtrl != null)
+                    {
+                        localCtrl.SetProfile(newProfile.username, newProfile.avatarId);
+                    }
+                }
+
+                _room.Send("updateProfile", new UpdateProfilePayload
+                {
+                    username = newProfile.username,
+                    avatarId = newProfile.avatarId,
+                    gender = newProfile.gender,
+                    age = newProfile.age,
+                    bio = newProfile.bio
+                });
             }
         }
 
@@ -266,7 +415,7 @@ namespace SmartSpace.Network
                     if (controller != null)
                     {
                         controller.SessionId = key;
-                        controller.Username = playerSchema.username;
+                        controller.SetProfile(playerSchema.username, playerSchema.avatarId);
                     }
                 }
             }
@@ -311,6 +460,7 @@ namespace SmartSpace.Network
             }
             _spawnedPlayers.Clear();
             OnlinePlayers.Clear();
+            OnlineProfiles.Clear();
         }
 
         public void SendMove(float x, float y, float z, float rotY, sbyte animState)

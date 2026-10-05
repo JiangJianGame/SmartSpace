@@ -42,6 +42,17 @@ namespace SmartSpace.Character
 
         public string SessionId { get; set; }
         public string Username { get; set; }
+        public int AvatarId { get; set; }
+
+        public void SetProfile(string newUsername, int newAvatarId)
+        {
+            Username = newUsername;
+            AvatarId = newAvatarId;
+            if (overheadUI != null)
+            {
+                overheadUI.SetUsername(Username, true);
+            }
+        }
 
         private void Awake()
         {

@@ -27,6 +27,7 @@ namespace SmartSpace.Character
 
         public string SessionId { get; private set; }
         public string Username { get; private set; }
+        public int AvatarId { get; private set; }
 
         private void Awake()
         {
@@ -50,6 +51,7 @@ namespace SmartSpace.Character
         {
             SessionId = playerSchema.id;
             Username = playerSchema.username;
+            AvatarId = playerSchema.avatarId;
 
             Vector3 initialPos = new Vector3((float)playerSchema.x, (float)playerSchema.y, (float)playerSchema.z);
             transform.position = initialPos;
@@ -65,6 +67,16 @@ namespace SmartSpace.Character
 
         public void UpdateFromSchema(Player playerSchema)
         {
+            if (Username != playerSchema.username)
+            {
+                Username = playerSchema.username;
+                if (overheadUI != null)
+                {
+                    overheadUI.SetUsername(Username, false);
+                }
+            }
+            AvatarId = playerSchema.avatarId;
+
             Vector3 newPos = new Vector3((float)playerSchema.x, (float)playerSchema.y, (float)playerSchema.z);
 
             // Teleport / snap if distance is too large

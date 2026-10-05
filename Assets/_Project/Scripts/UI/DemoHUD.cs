@@ -57,6 +57,18 @@ namespace SmartSpace.UI
         private bool _showQuickEmojiDrawer = false;
         private int _quickDrawerTab = 0; // 0: 表情, 1: 常用语
 
+        // User Profile System State
+        private bool _showInitialSetupModal = false;
+        private bool _showSelfProfileModal = false;
+        private int _selfProfileTab = 0; // 0: 名片查看, 1: 编辑资料
+        private UserProfile _editingProfile = new UserProfile();
+        private string _editingAgeStr = "";
+
+        // Target Player Profile Modal (右键头像查看他人名片)
+        private bool _showTargetProfileModal = false;
+        private UserProfile _targetProfile = null;
+        private string _targetProfileSessionId = "";
+
         private readonly List<ChatBubbleItem> _messages = new List<ChatBubbleItem>();
 
         // Custom UI Styles & Textures
@@ -85,6 +97,19 @@ namespace SmartSpace.UI
         private GUIStyle _statusLabelStyle;
         private GUIStyle _placeholderStyle;
 
+        // Profile & Modal Styles
+        private GUIStyle _modalOverlayStyle;
+        private GUIStyle _modalCardStyle;
+        private GUIStyle _modalTitleStyle;
+        private GUIStyle _modalLabelStyle;
+        private GUIStyle _modalSubLabelStyle;
+        private GUIStyle _modalInputStyle;
+        private GUIStyle _modalPrimaryBtnStyle;
+        private GUIStyle _modalSecondaryBtnStyle;
+        private GUIStyle _playerBarBoxStyle;
+        private GUIStyle _playerBarNameStyle;
+        private GUIStyle _playerBarTagStyle;
+
         private Texture2D _texMainBg;
         private Texture2D _texTabActive;
         private Texture2D _texTabInactive;
@@ -97,7 +122,14 @@ namespace SmartSpace.UI
         private Texture2D _texAvatarBorder;
         private Texture2D _texSmileyIcon;
 
-        // Procedural Avatars
+        // Modal & Profile Textures
+        private Texture2D _texModalOverlay;
+        private Texture2D _texModalCardBg;
+        private Texture2D _texInputDark;
+        private Texture2D _texPlayerBarBg;
+
+        // Procedural Avatars (预设 6 款个性化头像)
+        private Texture2D[] _avatarTextures;
         private Texture2D _texAvatarSelf;
         private Texture2D[] _texAvatarOthers;
 
@@ -136,18 +168,33 @@ namespace SmartSpace.UI
 
         private void Start()
         {
+            // Initialize local profile
+            var localProf = (NetworkManager.Instance != null && NetworkManager.Instance.LocalProfile != null)
+                ? NetworkManager.Instance.LocalProfile
+                : UserProfile.LoadFromPrefs();
+            _editingProfile = localProf.Clone();
+            _editingAgeStr = _editingProfile.age > 0 ? _editingProfile.age.ToString() : "";
+
+            // If not saved previously, prompt the setup modal before joining space
+            if (!UserProfile.HasSavedProfile())
+            {
+                _showInitialSetupModal = true;
+            }
+
             if (NetworkManager.Instance != null)
             {
                 NetworkManager.Instance.OnConnectionStateChanged += HandleConnectionStateChanged;
                 NetworkManager.Instance.OnChatMessageReceived += HandleChatMessage;
+                NetworkManager.Instance.OnChatMessageWithAvatarReceived += HandleChatMessageWithAvatar;
                 NetworkManager.Instance.OnWhisperMessageReceived += HandleWhisperMessage;
                 NetworkManager.Instance.OnPlayerJoined += HandlePlayerJoined;
                 NetworkManager.Instance.OnPlayerLeft += HandlePlayerLeft;
+                NetworkManager.Instance.OnPlayerProfileChanged += HandlePlayerProfileChanged;
             }
 
             // Initial Welcome System Message
             AddSystemMessage("成功连接至奥拉通讯网络。当前频道已就绪！");
-            AddSystemMessage("操作提示: WASD移动 | T动作轮盘 | C收放聊天窗口");
+            AddSystemMessage("提示: 左上角可查看/修改个人信息 | 聊天界面右键头像可查看名片！");
         }
 
         private void OnDestroy()
@@ -156,19 +203,30 @@ namespace SmartSpace.UI
             {
                 NetworkManager.Instance.OnConnectionStateChanged -= HandleConnectionStateChanged;
                 NetworkManager.Instance.OnChatMessageReceived -= HandleChatMessage;
+                NetworkManager.Instance.OnChatMessageWithAvatarReceived -= HandleChatMessageWithAvatar;
                 NetworkManager.Instance.OnWhisperMessageReceived -= HandleWhisperMessage;
                 NetworkManager.Instance.OnPlayerJoined -= HandlePlayerJoined;
                 NetworkManager.Instance.OnPlayerLeft -= HandlePlayerLeft;
+                NetworkManager.Instance.OnPlayerProfileChanged -= HandlePlayerProfileChanged;
             }
             CleanupTextures();
         }
 
         private void Update()
         {
-            // Toggle Expand/Collapse with 'C' key when not focused in input
-            if (Input.GetKeyDown(KeyCode.C) && GUI.GetNameOfFocusedControl() != "AolaChatInputField")
+            // Toggle Expand/Collapse with 'C' key when not focused in any input
+            bool isTyping = GUI.GetNameOfFocusedControl() == "AolaChatInputField" || _showInitialSetupModal || _showSelfProfileModal;
+            if (Input.GetKeyDown(KeyCode.C) && !isTyping)
             {
                 ToggleExpand();
+            }
+
+            // ESC to close open modals
+            if (Input.GetKeyDown(KeyCode.Escape))
+            {
+                if (_showTargetProfileModal) _showTargetProfileModal = false;
+                else if (_showSelfProfileModal) _showSelfProfileModal = false;
+                else if (_showPlayerSelectDropdown) _showPlayerSelectDropdown = false;
             }
         }
 
@@ -197,8 +255,23 @@ namespace SmartSpace.UI
 
         private void HandleChatMessage(string senderId, string username, string message)
         {
+            // Fallback if avatar id not dispatched
+            HandleChatMessageWithAvatar(senderId, username, 0, message);
+        }
+
+        private void HandleChatMessageWithAvatar(string senderId, string username, int avatarId, string message)
+        {
             string myId = NetworkManager.Instance != null ? NetworkManager.Instance.SessionId : "";
             bool isMe = (senderId == myId);
+
+            int finalAvatar = isMe
+                ? (NetworkManager.Instance != null && NetworkManager.Instance.LocalProfile != null ? NetworkManager.Instance.LocalProfile.avatarId : avatarId)
+                : avatarId;
+
+            if (!isMe && NetworkManager.Instance != null && NetworkManager.Instance.OnlineProfiles.TryGetValue(senderId, out var prof))
+            {
+                finalAvatar = prof.avatarId;
+            }
 
             AddBubbleMessage(new ChatBubbleItem
             {
@@ -209,7 +282,7 @@ namespace SmartSpace.UI
                 TimeStr = DateTime.Now.ToString("HH:mm"),
                 IsSelf = isMe,
                 Level = isMe ? 40 : (Math.Abs(senderId.GetHashCode() % 30) + 15),
-                AvatarIndex = Math.Abs(senderId.GetHashCode() % 3)
+                AvatarIndex = finalAvatar
             });
         }
 
@@ -231,6 +304,15 @@ namespace SmartSpace.UI
                 _whisperTargetName = msg.senderName;
             }
 
+            int avatarIdx = isMeSender
+                ? (NetworkManager.Instance != null && NetworkManager.Instance.LocalProfile != null ? NetworkManager.Instance.LocalProfile.avatarId : msg.senderAvatarId)
+                : msg.senderAvatarId;
+
+            if (!isMeSender && NetworkManager.Instance != null && NetworkManager.Instance.OnlineProfiles.TryGetValue(msg.senderId, out var prof))
+            {
+                avatarIdx = prof.avatarId;
+            }
+
             AddBubbleMessage(new ChatBubbleItem
             {
                 Channel = ChatChannel.Whisper,
@@ -242,7 +324,7 @@ namespace SmartSpace.UI
                 TimeStr = timeStr,
                 IsSelf = isMeSender,
                 Level = isMeSender ? 40 : (Math.Abs(msg.senderId.GetHashCode() % 30) + 15),
-                AvatarIndex = Math.Abs(msg.senderId.GetHashCode() % 3)
+                AvatarIndex = avatarIdx
             });
         }
 
@@ -262,6 +344,14 @@ namespace SmartSpace.UI
             {
                 _whisperTargetId = "";
                 _whisperTargetName = "";
+            }
+        }
+
+        private void HandlePlayerProfileChanged(string sessionId, UserProfile profile)
+        {
+            if (profile != null)
+            {
+                AddSystemMessage($"玩家 <color=#00E5FF><b>{profile.username}</b></color> 更新了个人资料。");
             }
         }
 
@@ -415,10 +505,29 @@ namespace SmartSpace.UI
             if (_texAvatarBorder != null) Destroy(_texAvatarBorder);
             if (_texAvatarSelf != null) Destroy(_texAvatarSelf);
             if (_texSmileyIcon != null) Destroy(_texSmileyIcon);
+            if (_texModalOverlay != null) Destroy(_texModalOverlay);
+            if (_texModalCardBg != null) Destroy(_texModalCardBg);
+            if (_texInputDark != null) Destroy(_texInputDark);
+            if (_texPlayerBarBg != null) Destroy(_texPlayerBarBg);
+
+            if (_avatarTextures != null)
+            {
+                foreach (var t in _avatarTextures) if (t != null) Destroy(t);
+            }
             if (_texAvatarOthers != null)
             {
                 foreach (var t in _texAvatarOthers) if (t != null) Destroy(t);
             }
+        }
+
+        public Texture2D GetAvatarTex(int index)
+        {
+            if (_avatarTextures != null && _avatarTextures.Length > 0)
+            {
+                int safeIdx = Mathf.Clamp(index, 0, _avatarTextures.Length - 1);
+                if (_avatarTextures[safeIdx] != null) return _avatarTextures[safeIdx];
+            }
+            return _texAvatarSelf;
         }
 
         private void InitStyles()
@@ -427,25 +536,32 @@ namespace SmartSpace.UI
 
             // 1. Textures
             _texMainBg = MakeSolidTex(2, 2, new Color(0.04f, 0.08f, 0.16f, 0.90f));
-            _texTabActive = MakeSolidTex(2, 2, new Color(0.12f, 0.48f, 0.88f, 1.0f)); // Bright Blue from screenshot
+            _texTabActive = MakeSolidTex(2, 2, new Color(0.12f, 0.48f, 0.88f, 1.0f)); // Bright Blue
             _texTabInactive = MakeSolidTex(2, 2, new Color(0.08f, 0.14f, 0.24f, 0.85f)); // Dark Slate Blue
             _texBubbleBlue = MakeBorderedTex(32, 32, new Color(0.08f, 0.44f, 0.82f, 0.96f), new Color(0.12f, 0.54f, 0.95f, 1f), 1);
-            _texSendBtnYellow = MakeSolidTex(2, 2, new Color(1.0f, 0.86f, 0.18f, 1.0f)); // Bright Golden-Yellow from screenshot
-            _texInputWhite = MakeSolidTex(2, 2, new Color(0.93f, 0.95f, 0.97f, 1.0f)); // White Input box from screenshot
+            _texSendBtnYellow = MakeSolidTex(2, 2, new Color(1.0f, 0.86f, 0.18f, 1.0f)); // Golden-Yellow
+            _texInputWhite = MakeSolidTex(2, 2, new Color(0.93f, 0.95f, 0.97f, 1.0f));
             _texEmojiDark = MakeSolidTex(2, 2, new Color(0.10f, 0.15f, 0.22f, 0.95f));
             _texDrawerBg = MakeSolidTex(2, 2, new Color(0.07f, 0.12f, 0.20f, 0.98f));
             _texMiniBarBg = MakeSolidTex(2, 2, new Color(0.05f, 0.09f, 0.16f, 0.90f));
             _texAvatarBorder = MakeBorderedTex(42, 42, new Color(0.10f, 0.16f, 0.26f, 1f), new Color(0.20f, 0.55f, 0.95f, 1f), 2);
             _texSmileyIcon = MakeSmileyTex(34);
 
-            // Avatars
-            _texAvatarSelf = MakeAvatarTex(new Color(0.0f, 0.65f, 0.95f), new Color(0.4f, 0.85f, 1f));
-            _texAvatarOthers = new Texture2D[]
+            // Modal & Profile Textures
+            _texModalOverlay = MakeSolidTex(2, 2, new Color(0.02f, 0.04f, 0.08f, 0.78f)); // Dark backdrop
+            _texModalCardBg = MakeBorderedTex(64, 64, new Color(0.06f, 0.10f, 0.19f, 0.98f), new Color(0.15f, 0.45f, 0.85f, 1.0f), 2);
+            _texInputDark = MakeBorderedTex(32, 32, new Color(0.04f, 0.07f, 0.14f, 0.95f), new Color(0.22f, 0.38f, 0.62f, 1f), 1);
+            _texPlayerBarBg = MakeBorderedTex(48, 48, new Color(0.05f, 0.09f, 0.18f, 0.92f), new Color(0.18f, 0.40f, 0.70f, 0.85f), 1);
+
+            // 6 Distinct Procedural Avatars
+            _avatarTextures = new Texture2D[UserProfile.AvatarNames.Length];
+            for (int i = 0; i < _avatarTextures.Length; i++)
             {
-                MakeAvatarTex(new Color(0.95f, 0.55f, 0.15f), new Color(1f, 0.75f, 0.3f)), // Fox/Pet Orange
-                MakeAvatarTex(new Color(0.85f, 0.25f, 0.35f), new Color(1f, 0.45f, 0.55f)), // Dragon Red
-                MakeAvatarTex(new Color(0.25f, 0.75f, 0.45f), new Color(0.5f, 0.95f, 0.65f))  // Nature Green
-            };
+                _avatarTextures[i] = MakeAvatarTex(UserProfile.AvatarPrimaryColors[i], UserProfile.AvatarSecondaryColors[i]);
+            }
+
+            _texAvatarSelf = _avatarTextures[0];
+            _texAvatarOthers = new Texture2D[] { _avatarTextures[1], _avatarTextures[2], _avatarTextures[3] };
 
             // 2. GUIStyles
             _mainPanelStyle = new GUIStyle(GUI.skin.box)
@@ -488,7 +604,7 @@ namespace SmartSpace.UI
                 fontStyle = FontStyle.Bold,
                 alignment = TextAnchor.MiddleLeft,
                 richText = true,
-                normal = { textColor = new Color(1.0f, 0.85f, 0.35f) } // Golden-Yellow from screenshot
+                normal = { textColor = new Color(1.0f, 0.85f, 0.35f) } // Golden-Yellow
             };
 
             _senderNameSelfStyle = new GUIStyle(GUI.skin.label)
@@ -525,10 +641,11 @@ namespace SmartSpace.UI
 
             _avatarLevelStyle = new GUIStyle(GUI.skin.label)
             {
-                fontSize = 10,
+                fontSize = 9,
                 fontStyle = FontStyle.Bold,
-                alignment = TextAnchor.LowerLeft,
-                normal = { textColor = Color.white }
+                alignment = TextAnchor.MiddleCenter,
+                padding = new RectOffset(0, 0, 0, 0),
+                normal = { textColor = new Color(1f, 0.88f, 0.25f) }
             };
 
             _systemNoticeBoxStyle = new GUIStyle(GUI.skin.box)
@@ -544,7 +661,7 @@ namespace SmartSpace.UI
                 fontStyle = FontStyle.Bold,
                 richText = true,
                 alignment = TextAnchor.MiddleLeft,
-                normal = { textColor = new Color(0.46f, 1.0f, 0.01f) }, // Vibrant Green #76FF03
+                normal = { textColor = new Color(0.46f, 1.0f, 0.01f) },
                 padding = new RectOffset(0, 0, 0, 0)
             };
 
@@ -564,7 +681,7 @@ namespace SmartSpace.UI
                 fontSize = 12,
                 alignment = TextAnchor.UpperLeft,
                 wordWrap = true,
-                normal = { textColor = new Color(0.12f, 0.12f, 0.12f), background = _texInputWhite }, // Dark text on white
+                normal = { textColor = new Color(0.12f, 0.12f, 0.12f), background = _texInputWhite },
                 padding = new RectOffset(8, 8, 6, 6)
             };
 
@@ -582,7 +699,7 @@ namespace SmartSpace.UI
                 fontSize = 13,
                 fontStyle = FontStyle.Bold,
                 alignment = TextAnchor.MiddleCenter,
-                normal = { textColor = new Color(0.18f, 0.14f, 0.04f), background = _texSendBtnYellow }, // Dark text on Yellow
+                normal = { textColor = new Color(0.18f, 0.14f, 0.04f), background = _texSendBtnYellow },
                 hover = { textColor = Color.black, background = _texSendBtnYellow }
             };
 
@@ -602,7 +719,6 @@ namespace SmartSpace.UI
                 hover = { textColor = Color.white, background = _texTabActive }
             };
 
-            // Drawer & Side Buttons
             _drawerBoxStyle = new GUIStyle(GUI.skin.box)
             {
                 normal = { background = _texDrawerBg },
@@ -633,7 +749,30 @@ namespace SmartSpace.UI
                 padding = new RectOffset(10, 10, 4, 4)
             };
 
-            // Status Panel (Top Left)
+            // Player Bar (Top Left)
+            _playerBarBoxStyle = new GUIStyle(GUI.skin.box)
+            {
+                normal = { background = _texPlayerBarBg },
+                padding = new RectOffset(8, 8, 8, 8)
+            };
+
+            _playerBarNameStyle = new GUIStyle(GUI.skin.label)
+            {
+                fontSize = 14,
+                fontStyle = FontStyle.Bold,
+                richText = true,
+                normal = { textColor = Color.white },
+                padding = new RectOffset(0, 0, 0, 0)
+            };
+
+            _playerBarTagStyle = new GUIStyle(GUI.skin.label)
+            {
+                fontSize = 11,
+                richText = true,
+                normal = { textColor = new Color(0.65f, 0.80f, 0.95f) },
+                padding = new RectOffset(0, 0, 0, 0)
+            };
+
             _statusPanelStyle = new GUIStyle(GUI.skin.box)
             {
                 normal = { background = _texMainBg },
@@ -647,6 +786,71 @@ namespace SmartSpace.UI
                 padding = new RectOffset(0, 0, 1, 1)
             };
 
+            // Modal Dialog Styles
+            _modalOverlayStyle = new GUIStyle(GUI.skin.box)
+            {
+                normal = { background = _texModalOverlay },
+                padding = new RectOffset(0, 0, 0, 0)
+            };
+
+            _modalCardStyle = new GUIStyle(GUI.skin.box)
+            {
+                normal = { background = _texModalCardBg },
+                padding = new RectOffset(20, 20, 16, 16)
+            };
+
+            _modalTitleStyle = new GUIStyle(GUI.skin.label)
+            {
+                fontSize = 16,
+                fontStyle = FontStyle.Bold,
+                alignment = TextAnchor.MiddleCenter,
+                richText = true,
+                normal = { textColor = new Color(1.0f, 0.88f, 0.35f) }
+            };
+
+            _modalLabelStyle = new GUIStyle(GUI.skin.label)
+            {
+                fontSize = 13,
+                fontStyle = FontStyle.Bold,
+                richText = true,
+                normal = { textColor = new Color(0.75f, 0.90f, 1.0f) },
+                padding = new RectOffset(0, 0, 2, 2)
+            };
+
+            _modalSubLabelStyle = new GUIStyle(GUI.skin.label)
+            {
+                fontSize = 11,
+                richText = true,
+                normal = { textColor = new Color(0.60f, 0.70f, 0.82f) },
+                padding = new RectOffset(0, 0, 0, 0)
+            };
+
+            _modalInputStyle = new GUIStyle(GUI.skin.textField)
+            {
+                fontSize = 13,
+                alignment = TextAnchor.MiddleLeft,
+                normal = { textColor = Color.white, background = _texInputDark },
+                focused = { textColor = Color.white, background = _texInputDark },
+                padding = new RectOffset(8, 8, 4, 4)
+            };
+
+            _modalPrimaryBtnStyle = new GUIStyle(GUI.skin.button)
+            {
+                fontSize = 14,
+                fontStyle = FontStyle.Bold,
+                alignment = TextAnchor.MiddleCenter,
+                normal = { textColor = new Color(0.12f, 0.10f, 0.02f), background = _texSendBtnYellow },
+                hover = { textColor = Color.black, background = _texSendBtnYellow }
+            };
+
+            _modalSecondaryBtnStyle = new GUIStyle(GUI.skin.button)
+            {
+                fontSize = 13,
+                alignment = TextAnchor.MiddleCenter,
+                normal = { textColor = new Color(0.85f, 0.92f, 1.0f), background = _texTabInactive },
+                hover = { textColor = Color.white, background = _texTabActive }
+            };
+
             _stylesInitialized = true;
         }
 
@@ -658,8 +862,8 @@ namespace SmartSpace.UI
         {
             InitStyles();
 
-            // 1. Top-Left System Status Panel
-            DrawStatusPanel();
+            // 1. Top-Left Player Profile Bar (可查看与点击修改个人资料)
+            DrawPlayerProfileBar();
 
             // 2. Chat Panel (2/3 Height Expanded OR Mini Collapsed Bar)
             if (_isExpanded)
@@ -670,31 +874,87 @@ namespace SmartSpace.UI
             {
                 DrawCollapsedMiniBar();
             }
+
+            // 3. Top-Level Modal Dialogs
+            if (_showInitialSetupModal)
+            {
+                DrawInitialSetupModal();
+            }
+            else if (_showSelfProfileModal)
+            {
+                DrawSelfProfileModal();
+            }
+            else if (_showTargetProfileModal)
+            {
+                DrawTargetProfileModal();
+            }
         }
 
-        private void DrawStatusPanel()
+        private void DrawPlayerProfileBar()
         {
+            var localProf = (NetworkManager.Instance != null && NetworkManager.Instance.LocalProfile != null)
+                ? NetworkManager.Instance.LocalProfile
+                : _editingProfile;
+
             bool isConnected = NetworkManager.Instance != null && NetworkManager.Instance.IsConnected;
-            string sessionId = NetworkManager.Instance != null ? NetworkManager.Instance.SessionId : "无";
             int playerCount = NetworkManager.Instance != null ? NetworkManager.Instance.PlayerCount : 0;
+            Texture2D myAvatar = GetAvatarTex(localProf.avatarId);
 
-            float statusW = 340f;
-            float statusH = 148f;
-            GUILayout.BeginArea(new Rect(16, 16, statusW, statusH), _statusPanelStyle);
+            float barW = 320f;
+            float barH = 72f;
+            Rect barRect = new Rect(16, 16, barW, barH);
 
-            GUILayout.Label("<size=14><b><color=#00E5FF>◆</color> 智慧空间 · 社交漫游系统</b></size>", _senderNameOtherStyle);
-            GUILayout.Space(2);
+            GUILayout.BeginArea(barRect, _playerBarBoxStyle);
+            GUILayout.BeginHorizontal();
 
-            string statusColor = isConnected ? "#00E676" : "#FF5252";
-            string statusText = isConnected ? "已连接" : "未连接";
-            GUILayout.Label($"服务器: <color={statusColor}><b>● {statusText}</b></color> (ws://localhost:2567)", _statusLabelStyle);
-            GUILayout.Label($"会话 ID: <color=#80D8FF>{sessionId}</color>", _statusLabelStyle);
-            GUILayout.Label($"广场在线人数: <color=#FFD54F><b>{playerCount}</b> 人</color>", _statusLabelStyle);
+            // Left Avatar (54x54) with level badge
+            Rect avRect = GUILayoutUtility.GetRect(54, 54, GUILayout.Width(54), GUILayout.Height(54));
+            GUI.DrawTexture(avRect, _texAvatarBorder);
+            GUI.DrawTexture(new Rect(avRect.x + 3, avRect.y + 3, 48, 48), myAvatar);
+            Rect lvlBarBadge = new Rect(avRect.x + 2, avRect.y + 36, 32, 15);
+            GUI.DrawTexture(lvlBarBadge, _texMiniBarBg);
+            GUI.Label(lvlBarBadge, $"Lv.{localProf.level}", _avatarLevelStyle);
 
-            GUILayout.Space(2);
-            GUILayout.Label("<color=#90A4AE>WASD移动 | Shift疾跑 | 空格跳跃 | <b>[T]</b>动作轮盘</color>", _statusLabelStyle);
+            GUILayout.Space(8);
 
+            // Right Info Column
+            GUILayout.BeginVertical();
+
+            // Row 1: Nickname + Gender Symbol + Edit Button
+            GUILayout.BeginHorizontal();
+            string gSymbol = UserProfile.GetGenderSymbol(localProf.gender);
+            string gColor = UserProfile.GetGenderColor(localProf.gender);
+            GUILayout.Label($"<b>{localProf.username}</b> <color={gColor}>{gSymbol}</color>", _playerBarNameStyle, GUILayout.Height(20));
+            GUILayout.FlexibleSpace();
+            if (GUILayout.Button("✏️ 资料", _sideActionBtnStyle, GUILayout.Width(52), GUILayout.Height(20)))
+            {
+                OpenSelfProfileModal();
+            }
+            GUILayout.EndHorizontal();
+
+            GUILayout.Space(1);
+
+            // Row 2: Connection Status + Online Players
+            string statusDot = isConnected ? "<color=#00E676>● 已连接</color>" : "<color=#FF5252>● 离线</color>";
+            string pingText = isConnected ? "50ms" : "--";
+            GUILayout.Label($"{statusDot} ({pingText}) | 广场: <color=#FFD54F><b>{playerCount}</b></color> 人", _playerBarTagStyle, GUILayout.Height(16));
+
+            // Row 3: Bio snippet (clickable hint)
+            string bioSnippet = string.IsNullOrEmpty(localProf.bio) ? "暂无签名，点击编辑名片" : localProf.bio;
+            if (bioSnippet.Length > 16) bioSnippet = bioSnippet.Substring(0, 15) + "...";
+            GUILayout.Label($"<color=#90A4AE><i>“{bioSnippet}”</i></color>", _playerBarTagStyle, GUILayout.Height(16));
+
+            GUILayout.EndVertical();
+
+            GUILayout.EndHorizontal();
             GUILayout.EndArea();
+
+            // Clicking avatar in the profile bar also opens self profile center
+            if (Event.current.type == EventType.MouseDown && new Rect(16, 16, 70, 72).Contains(Event.current.mousePosition))
+            {
+                Event.current.Use();
+                OpenSelfProfileModal();
+            }
         }
 
         private void DrawAolaStarChatWindow()
@@ -918,8 +1178,12 @@ namespace SmartSpace.UI
         {
             GUILayout.Space(6);
 
-            Texture2D avatarTex = msg.IsSelf ? _texAvatarSelf : _texAvatarOthers[msg.AvatarIndex % _texAvatarOthers.Length];
+            Texture2D avatarTex = msg.IsSelf
+                ? GetAvatarTex(NetworkManager.Instance != null && NetworkManager.Instance.LocalProfile != null ? NetworkManager.Instance.LocalProfile.avatarId : 0)
+                : GetAvatarTex(msg.AvatarIndex);
             float maxBubbleW = Mathf.Clamp(contentWidth - 110f, 180f, 260f);
+
+            Event curEvent = Event.current;
 
             if (!msg.IsSelf)
             {
@@ -928,11 +1192,20 @@ namespace SmartSpace.UI
                 // ---------------------------------------------------------
                 GUILayout.BeginHorizontal();
 
-                // Avatar Box with Level
+                // Avatar Box with Level (右键/左键点击查看该玩家名片)
                 Rect avatarRect = GUILayoutUtility.GetRect(42, 42, GUILayout.Width(42), GUILayout.Height(42));
+                bool isHover = avatarRect.Contains(curEvent.mousePosition);
                 GUI.DrawTexture(avatarRect, _texAvatarBorder);
                 GUI.DrawTexture(new Rect(avatarRect.x + 2, avatarRect.y + 2, 38, 38), avatarTex);
-                GUI.Label(new Rect(avatarRect.x + 4, avatarRect.y + 24, 20, 16), $"{msg.Level}", _avatarLevelStyle);
+                Rect lvlBadge = new Rect(avatarRect.x + 1, avatarRect.y + 27, 24, 13);
+                GUI.DrawTexture(lvlBadge, _texMiniBarBg);
+                GUI.Label(lvlBadge, $"{msg.Level}", _avatarLevelStyle);
+
+                if (curEvent.type == EventType.MouseDown && isHover)
+                {
+                    curEvent.Use();
+                    OpenTargetProfileModal(msg.SenderId, msg.SenderName, msg.AvatarIndex);
+                }
 
                 GUILayout.Space(6);
 
@@ -964,11 +1237,20 @@ namespace SmartSpace.UI
 
                 GUILayout.Space(6);
 
-                // Avatar Box with Level
+                // Avatar Box with Level (点击自己的头像打开个人资料中心)
                 Rect avatarRect = GUILayoutUtility.GetRect(42, 42, GUILayout.Width(42), GUILayout.Height(42));
+                bool isHover = avatarRect.Contains(curEvent.mousePosition);
                 GUI.DrawTexture(avatarRect, _texAvatarBorder);
                 GUI.DrawTexture(new Rect(avatarRect.x + 2, avatarRect.y + 2, 38, 38), avatarTex);
-                GUI.Label(new Rect(avatarRect.x + 4, avatarRect.y + 24, 20, 16), $"{msg.Level}", _avatarLevelStyle);
+                Rect lvlBadge = new Rect(avatarRect.x + 17, avatarRect.y + 27, 24, 13);
+                GUI.DrawTexture(lvlBadge, _texMiniBarBg);
+                GUI.Label(lvlBadge, $"{msg.Level}", _avatarLevelStyle);
+
+                if (curEvent.type == EventType.MouseDown && isHover)
+                {
+                    curEvent.Use();
+                    OpenSelfProfileModal();
+                }
 
                 GUILayout.EndHorizontal();
             }
@@ -1263,6 +1545,453 @@ namespace SmartSpace.UI
             }
         }
 
+        private void OpenSelfProfileModal()
+        {
+            var localProf = (NetworkManager.Instance != null && NetworkManager.Instance.LocalProfile != null)
+                ? NetworkManager.Instance.LocalProfile
+                : UserProfile.LoadFromPrefs();
+            _editingProfile = localProf.Clone();
+            _editingAgeStr = _editingProfile.age > 0 ? _editingProfile.age.ToString() : "";
+            _selfProfileTab = 0;
+            _showSelfProfileModal = true;
+            _showTargetProfileModal = false;
+        }
+
+        private void OpenTargetProfileModal(string senderId, string senderName, int avatarIndex)
+        {
+            if (NetworkManager.Instance != null && NetworkManager.Instance.OnlineProfiles.TryGetValue(senderId, out var prof))
+            {
+                _targetProfile = prof.Clone();
+            }
+            else
+            {
+                _targetProfile = new UserProfile
+                {
+                    username = senderName,
+                    avatarId = avatarIndex,
+                    gender = "secret",
+                    age = 0,
+                    bio = "这个玩家很神秘，还没有写个性签名~",
+                    level = Math.Abs(senderId.GetHashCode() % 30) + 15
+                };
+            }
+            _targetProfileSessionId = senderId;
+            _showTargetProfileModal = true;
+            _showSelfProfileModal = false;
+        }
+
+        private void DrawAvatarSelectorGrid(ref int selectedId)
+        {
+            GUILayout.BeginHorizontal();
+            for (int i = 0; i < UserProfile.AvatarNames.Length; i++)
+            {
+                bool isSelected = (selectedId == i);
+                Texture2D avTex = GetAvatarTex(i);
+
+                GUILayout.BeginVertical(GUILayout.Width(56));
+
+                // Avatar Icon Button
+                Rect r = GUILayoutUtility.GetRect(50, 50, GUILayout.Width(50), GUILayout.Height(50));
+                if (isSelected)
+                {
+                    GUI.DrawTexture(new Rect(r.x - 2, r.y - 2, 54, 54), _texTabActive);
+                }
+                GUI.DrawTexture(r, _texAvatarBorder);
+                GUI.DrawTexture(new Rect(r.x + 3, r.y + 3, 44, 44), avTex);
+
+                if (Event.current.type == EventType.MouseDown && r.Contains(Event.current.mousePosition))
+                {
+                    selectedId = i;
+                    Event.current.Use();
+                }
+
+                // Name label
+                string colorTag = isSelected ? "#00E5FF" : "#90A4AE";
+                GUILayout.Label($"<size=10><color={colorTag}><b>{UserProfile.AvatarNames[i]}</b></color></size>", _marqueeStyle, GUILayout.Width(56));
+
+                GUILayout.EndVertical();
+                GUILayout.Space(4);
+            }
+            GUILayout.EndHorizontal();
+        }
+
+        private void DrawInitialSetupModal()
+        {
+            // Full-screen backdrop overlay
+            GUI.DrawTexture(new Rect(0, 0, Screen.width, Screen.height), _texModalOverlay);
+
+            float cardW = 440f;
+            float cardH = 490f;
+            float cardX = (Screen.width - cardW) * 0.5f;
+            float cardY = (Screen.height - cardH) * 0.5f;
+
+            GUILayout.BeginArea(new Rect(cardX, cardY, cardW, cardH), _modalCardStyle);
+            GUILayout.BeginVertical();
+
+            // Title
+            GUILayout.Label("<size=16><b><color=#00E5FF>◆</color> 欢迎来到智慧空间 · 设置个人名片 <color=#00E5FF>◆</color></b></size>", _modalTitleStyle);
+            GUILayout.Label("<color=#90A4AE>设置您的个性形象，让空间好友更好认识你！</color>", _marqueeStyle);
+            GUILayout.Space(8);
+
+            // 1. Avatar Selection
+            GUILayout.Label("<b>1. 选择专属形象:</b>", _modalLabelStyle);
+            int selectedAv = _editingProfile.avatarId;
+            DrawAvatarSelectorGrid(ref selectedAv);
+            _editingProfile.avatarId = selectedAv;
+            GUILayout.Space(8);
+
+            // 2. Nickname (Required)
+            GUILayout.BeginHorizontal();
+            GUILayout.Label("<b>2. 空间昵称 (公开展示):</b>", _modalLabelStyle);
+            GUILayout.FlexibleSpace();
+            if (GUILayout.Button("🎲 随机", _sideActionBtnStyle, GUILayout.Width(52), GUILayout.Height(18)))
+            {
+                _editingProfile.username = UserProfile.GenerateRandomNickname();
+            }
+            GUILayout.EndHorizontal();
+
+            _editingProfile.username = GUILayout.TextField(_editingProfile.username, 14, _modalInputStyle, GUILayout.Height(28));
+            GUILayout.Space(8);
+
+            // 3. Gender & Age
+            GUILayout.BeginHorizontal();
+
+            // Gender
+            GUILayout.BeginVertical(GUILayout.Width(220));
+            GUILayout.Label("<b>3. 性别:</b>", _modalLabelStyle);
+            GUILayout.BeginHorizontal();
+            if (GUILayout.Button("♂ 男生", _editingProfile.gender == "male" ? _tabActiveStyle : _tabInactiveStyle, GUILayout.Height(26))) _editingProfile.gender = "male";
+            if (GUILayout.Button("♀ 女生", _editingProfile.gender == "female" ? _tabActiveStyle : _tabInactiveStyle, GUILayout.Height(26))) _editingProfile.gender = "female";
+            if (GUILayout.Button("✦ 保密", _editingProfile.gender == "secret" ? _tabActiveStyle : _tabInactiveStyle, GUILayout.Height(26))) _editingProfile.gender = "secret";
+            GUILayout.EndHorizontal();
+            GUILayout.EndVertical();
+
+            GUILayout.Space(12);
+
+            // Age (Optional/Private)
+            GUILayout.BeginVertical(GUILayout.Width(160));
+            GUILayout.Label("<b>4. 年龄 <color=#90A4AE>(选填/保密)</color>:</b>", _modalLabelStyle);
+            _editingAgeStr = GUILayout.TextField(_editingAgeStr, 3, _modalInputStyle, GUILayout.Height(26));
+            if (int.TryParse(_editingAgeStr, out int parsedAge))
+            {
+                _editingProfile.age = Mathf.Clamp(parsedAge, 0, 120);
+            }
+            else
+            {
+                _editingProfile.age = 0;
+            }
+            GUILayout.EndVertical();
+
+            GUILayout.EndHorizontal();
+            GUILayout.Space(8);
+
+            // 5. Bio (Optional)
+            GUILayout.Label("<b>5. 个性签名 <color=#90A4AE>(选填，介绍一下自己吧~)</color>:</b>", _modalLabelStyle);
+            _editingProfile.bio = GUILayout.TextField(_editingProfile.bio, 50, _modalInputStyle, GUILayout.Height(28));
+            GUILayout.Space(16);
+
+            // Confirm Join Button
+            if (GUILayout.Button("🚀  开启智慧空间之旅（进入大空间）", _modalPrimaryBtnStyle, GUILayout.Height(42)))
+            {
+                if (string.IsNullOrEmpty(_editingProfile.username.Trim()))
+                {
+                    _editingProfile.username = UserProfile.GenerateRandomNickname();
+                }
+
+                _editingProfile.SaveToPrefs();
+                _showInitialSetupModal = false;
+
+                if (NetworkManager.Instance != null)
+                {
+                    NetworkManager.Instance.Connect(_editingProfile);
+                }
+                AddSystemMessage($"欢迎 <color=#FFD54F><b>{_editingProfile.username}</b></color> 加入智慧空间！✨");
+            }
+
+            GUILayout.EndVertical();
+            GUILayout.EndArea();
+        }
+
+        private void DrawSelfProfileModal()
+        {
+            GUI.DrawTexture(new Rect(0, 0, Screen.width, Screen.height), _texModalOverlay);
+
+            float cardW = 440f;
+            float cardH = 470f;
+            float cardX = (Screen.width - cardW) * 0.5f;
+            float cardY = (Screen.height - cardH) * 0.5f;
+
+            GUILayout.BeginArea(new Rect(cardX, cardY, cardW, cardH), _modalCardStyle);
+            GUILayout.BeginVertical();
+
+            // Modal Header with Tabs
+            GUILayout.BeginHorizontal();
+            GUIStyle tab0Style = (_selfProfileTab == 0) ? _tabActiveStyle : _tabInactiveStyle;
+            GUIStyle tab1Style = (_selfProfileTab == 1) ? _tabActiveStyle : _tabInactiveStyle;
+
+            if (GUILayout.Button("🪪 个人名片", tab0Style, GUILayout.Width(110), GUILayout.Height(28))) _selfProfileTab = 0;
+            if (GUILayout.Button("✏️ 修改资料", tab1Style, GUILayout.Width(110), GUILayout.Height(28))) _selfProfileTab = 1;
+
+            GUILayout.FlexibleSpace();
+            if (GUILayout.Button("✕", _sideActionBtnStyle, GUILayout.Width(26), GUILayout.Height(24)))
+            {
+                _showSelfProfileModal = false;
+            }
+            GUILayout.EndHorizontal();
+
+            GUILayout.Space(12);
+
+            var localProf = (NetworkManager.Instance != null && NetworkManager.Instance.LocalProfile != null)
+                ? NetworkManager.Instance.LocalProfile
+                : _editingProfile;
+
+            if (_selfProfileTab == 0)
+            {
+                // -------------------------------------------------------------
+                // VIEW MODE (个人名片查看)
+                // -------------------------------------------------------------
+                GUILayout.BeginHorizontal();
+
+                // Large Avatar (64x64)
+                Rect avRect = GUILayoutUtility.GetRect(64, 64, GUILayout.Width(64), GUILayout.Height(64));
+                GUI.DrawTexture(avRect, _texAvatarBorder);
+                GUI.DrawTexture(new Rect(avRect.x + 3, avRect.y + 3, 58, 58), GetAvatarTex(localProf.avatarId));
+                Rect lvlModalBadge = new Rect(avRect.x + 3, avRect.y + 45, 34, 15);
+                GUI.DrawTexture(lvlModalBadge, _texMiniBarBg);
+                GUI.Label(lvlModalBadge, $"Lv.{localProf.level}", _avatarLevelStyle);
+
+                GUILayout.Space(14);
+
+                // Right Info Column
+                GUILayout.BeginVertical();
+                string gSymbol = UserProfile.GetGenderSymbol(localProf.gender);
+                string gColor = UserProfile.GetGenderColor(localProf.gender);
+                GUILayout.Label($"<size=17><b>{localProf.username}</b></size> <size=15><color={gColor}>{gSymbol}</color></size>", _playerBarNameStyle);
+                GUILayout.Space(2);
+
+                string mySessionId = NetworkManager.Instance != null ? NetworkManager.Instance.SessionId : "未连接";
+                GUILayout.Label($"<color=#90A4AE>UID / 会话: </color><color=#80D8FF>{mySessionId}</color>", _playerBarTagStyle);
+                GUILayout.Label($"<color=#90A4AE>形象预设: </color><color=#FFD54F>{UserProfile.AvatarNames[Mathf.Clamp(localProf.avatarId, 0, UserProfile.AvatarNames.Length - 1)]}</color>", _playerBarTagStyle);
+                GUILayout.EndVertical();
+
+                GUILayout.EndHorizontal();
+
+                GUILayout.Space(14);
+
+                // Detail Attributes Card
+                GUILayout.BeginVertical(_systemNoticeBoxStyle);
+                GUILayout.Label($"<b>性别:</b>  <color={gColor}>{UserProfile.GetGenderLabel(localProf.gender)} {gSymbol}</color>", _modalLabelStyle);
+                GUILayout.Label($"<b>年龄:</b>  <color=#80D8FF>{UserProfile.GetAgeDisplay(localProf.age)}</color>", _modalLabelStyle);
+                GUILayout.Label($"<b>常驻频道:</b>  <color=#00E5FF>智慧空间·漫游广场</color>", _modalLabelStyle);
+                GUILayout.EndVertical();
+
+                GUILayout.Space(10);
+
+                // Bio Quote Card
+                GUILayout.Label("<b>个性签名:</b>", _modalLabelStyle);
+                string bioText = string.IsNullOrEmpty(localProf.bio) ? "暂无个性签名，快去完善吧~" : localProf.bio;
+                GUILayout.BeginVertical(_drawerBoxStyle);
+                GUILayout.Label($"<color=#E0F7FA><i>“{bioText}”</i></color>", _systemContentStyle);
+                GUILayout.EndVertical();
+
+                GUILayout.FlexibleSpace();
+
+                // Bottom Action Buttons
+                GUILayout.BeginHorizontal();
+                if (GUILayout.Button("✏️  修改个人资料", _modalPrimaryBtnStyle, GUILayout.Height(38)))
+                {
+                    _editingProfile = localProf.Clone();
+                    _editingAgeStr = _editingProfile.age > 0 ? _editingProfile.age.ToString() : "";
+                    _selfProfileTab = 1;
+                }
+                GUILayout.Space(8);
+                if (GUILayout.Button("关 闭", _modalSecondaryBtnStyle, GUILayout.Width(90), GUILayout.Height(38)))
+                {
+                    _showSelfProfileModal = false;
+                }
+                GUILayout.EndHorizontal();
+            }
+            else
+            {
+                // -------------------------------------------------------------
+                // EDIT MODE (资料修改编辑)
+                // -------------------------------------------------------------
+                GUILayout.Label("<b>更换专属头像:</b>", _modalLabelStyle);
+                int selAv = _editingProfile.avatarId;
+                DrawAvatarSelectorGrid(ref selAv);
+                _editingProfile.avatarId = selAv;
+                GUILayout.Space(6);
+
+                GUILayout.BeginHorizontal();
+                GUILayout.Label("<b>修改昵称:</b>", _modalLabelStyle);
+                GUILayout.FlexibleSpace();
+                if (GUILayout.Button("🎲 随机", _sideActionBtnStyle, GUILayout.Width(52), GUILayout.Height(18)))
+                {
+                    _editingProfile.username = UserProfile.GenerateRandomNickname();
+                }
+                GUILayout.EndHorizontal();
+                _editingProfile.username = GUILayout.TextField(_editingProfile.username, 14, _modalInputStyle, GUILayout.Height(28));
+                GUILayout.Space(6);
+
+                // Gender & Age Row
+                GUILayout.BeginHorizontal();
+                GUILayout.BeginVertical(GUILayout.Width(220));
+                GUILayout.Label("<b>性别:</b>", _modalLabelStyle);
+                GUILayout.BeginHorizontal();
+                if (GUILayout.Button("♂ 男生", _editingProfile.gender == "male" ? _tabActiveStyle : _tabInactiveStyle, GUILayout.Height(26))) _editingProfile.gender = "male";
+                if (GUILayout.Button("♀ 女生", _editingProfile.gender == "female" ? _tabActiveStyle : _tabInactiveStyle, GUILayout.Height(26))) _editingProfile.gender = "female";
+                if (GUILayout.Button("✦ 保密", _editingProfile.gender == "secret" ? _tabActiveStyle : _tabInactiveStyle, GUILayout.Height(26))) _editingProfile.gender = "secret";
+                GUILayout.EndHorizontal();
+                GUILayout.EndVertical();
+
+                GUILayout.Space(12);
+
+                GUILayout.BeginVertical(GUILayout.Width(160));
+                GUILayout.Label("<b>年龄 <color=#90A4AE>(选填/保密)</color>:</b>", _modalLabelStyle);
+                _editingAgeStr = GUILayout.TextField(_editingAgeStr, 3, _modalInputStyle, GUILayout.Height(26));
+                if (int.TryParse(_editingAgeStr, out int parsedAge))
+                {
+                    _editingProfile.age = Mathf.Clamp(parsedAge, 0, 120);
+                }
+                else
+                {
+                    _editingProfile.age = 0;
+                }
+                GUILayout.EndVertical();
+                GUILayout.EndHorizontal();
+                GUILayout.Space(6);
+
+                GUILayout.Label("<b>个性签名:</b>", _modalLabelStyle);
+                _editingProfile.bio = GUILayout.TextField(_editingProfile.bio, 50, _modalInputStyle, GUILayout.Height(28));
+
+                GUILayout.FlexibleSpace();
+
+                // Save or Cancel Buttons
+                GUILayout.BeginHorizontal();
+                if (GUILayout.Button("💾  保存修改并同步", _modalPrimaryBtnStyle, GUILayout.Height(38)))
+                {
+                    if (string.IsNullOrEmpty(_editingProfile.username.Trim()))
+                    {
+                        _editingProfile.username = UserProfile.GenerateRandomNickname();
+                    }
+
+                    if (NetworkManager.Instance != null)
+                    {
+                        NetworkManager.Instance.UpdateProfile(_editingProfile);
+                    }
+                    _selfProfileTab = 0;
+                }
+                GUILayout.Space(8);
+                if (GUILayout.Button("取 消", _modalSecondaryBtnStyle, GUILayout.Width(90), GUILayout.Height(38)))
+                {
+                    _selfProfileTab = 0;
+                }
+                GUILayout.EndHorizontal();
+            }
+
+            GUILayout.EndVertical();
+            GUILayout.EndArea();
+        }
+
+        private void DrawTargetProfileModal()
+        {
+            if (_targetProfile == null)
+            {
+                _showTargetProfileModal = false;
+                return;
+            }
+
+            GUI.DrawTexture(new Rect(0, 0, Screen.width, Screen.height), _texModalOverlay);
+
+            float cardW = 420f;
+            float cardH = 430f;
+            float cardX = (Screen.width - cardW) * 0.5f;
+            float cardY = (Screen.height - cardH) * 0.5f;
+
+            GUILayout.BeginArea(new Rect(cardX, cardY, cardW, cardH), _modalCardStyle);
+            GUILayout.BeginVertical();
+
+            // Header
+            GUILayout.BeginHorizontal();
+            GUILayout.Label("<size=15><b><color=#00E5FF>◆</color> 玩家个人名片 <color=#00E5FF>◆</color></b></size>", _senderNameOtherStyle);
+            GUILayout.FlexibleSpace();
+            if (GUILayout.Button("✕", _sideActionBtnStyle, GUILayout.Width(26), GUILayout.Height(24)))
+            {
+                _showTargetProfileModal = false;
+            }
+            GUILayout.EndHorizontal();
+
+            GUILayout.Space(12);
+
+            // Target Player Avatar & Basic Info
+            GUILayout.BeginHorizontal();
+
+            Rect avRect = GUILayoutUtility.GetRect(64, 64, GUILayout.Width(64), GUILayout.Height(64));
+            GUI.DrawTexture(avRect, _texAvatarBorder);
+            GUI.DrawTexture(new Rect(avRect.x + 3, avRect.y + 3, 58, 58), GetAvatarTex(_targetProfile.avatarId));
+            Rect lvlModalBadge = new Rect(avRect.x + 3, avRect.y + 45, 34, 15);
+            GUI.DrawTexture(lvlModalBadge, _texMiniBarBg);
+            GUI.Label(lvlModalBadge, $"Lv.{_targetProfile.level}", _avatarLevelStyle);
+
+            GUILayout.Space(14);
+
+            GUILayout.BeginVertical();
+            string gSymbol = UserProfile.GetGenderSymbol(_targetProfile.gender);
+            string gColor = UserProfile.GetGenderColor(_targetProfile.gender);
+            GUILayout.Label($"<size=17><b>{_targetProfile.username}</b></size> <size=15><color={gColor}>{gSymbol}</color></size>", _playerBarNameStyle);
+            GUILayout.Space(2);
+
+            GUILayout.Label($"<color=#90A4AE>会话 ID: </color><color=#80D8FF>{_targetProfileSessionId}</color>", _playerBarTagStyle);
+            GUILayout.Label($"<color=#90A4AE>形象预设: </color><color=#FFD54F>{UserProfile.AvatarNames[Mathf.Clamp(_targetProfile.avatarId, 0, UserProfile.AvatarNames.Length - 1)]}</color>", _playerBarTagStyle);
+            GUILayout.EndVertical();
+
+            GUILayout.EndHorizontal();
+
+            GUILayout.Space(12);
+
+            // Attributes Card
+            GUILayout.BeginVertical(_systemNoticeBoxStyle);
+            GUILayout.Label($"<b>性别:</b>  <color={gColor}>{UserProfile.GetGenderLabel(_targetProfile.gender)} {gSymbol}</color>", _modalLabelStyle);
+            GUILayout.Label($"<b>年龄:</b>  <color=#80D8FF>{UserProfile.GetAgeDisplay(_targetProfile.age)}</color>", _modalLabelStyle);
+            GUILayout.Label($"<b>状态:</b>  <color=#00E676>● 正在智慧空间广场漫游</color>", _modalLabelStyle);
+            GUILayout.EndVertical();
+
+            GUILayout.Space(10);
+
+            // Bio
+            GUILayout.Label("<b>个性签名:</b>", _modalLabelStyle);
+            string bioText = string.IsNullOrEmpty(_targetProfile.bio) ? "这个玩家很神秘，还没有写个性签名~" : _targetProfile.bio;
+            GUILayout.BeginVertical(_drawerBoxStyle);
+            GUILayout.Label($"<color=#E0F7FA><i>“{bioText}”</i></color>", _systemContentStyle);
+            GUILayout.EndVertical();
+
+            GUILayout.FlexibleSpace();
+
+            // Bottom Actions: Whisper or Close
+            GUILayout.BeginHorizontal();
+            if (GUILayout.Button("💬  发起私聊", _modalPrimaryBtnStyle, GUILayout.Height(38)))
+            {
+                _whisperTargetId = _targetProfileSessionId;
+                _whisperTargetName = _targetProfile.username;
+                _currentChannel = ChatChannel.Whisper;
+                _showTargetProfileModal = false;
+                _isExpanded = true;
+                _shouldScrollToBottom = true;
+            }
+
+            GUILayout.Space(8);
+
+            if (GUILayout.Button("关 闭", _modalSecondaryBtnStyle, GUILayout.Width(90), GUILayout.Height(38)))
+            {
+                _showTargetProfileModal = false;
+            }
+            GUILayout.EndHorizontal();
+
+            GUILayout.EndVertical();
+            GUILayout.EndArea();
+        }
+
         #endregion
     }
 }
+

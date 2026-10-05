@@ -91,14 +91,6 @@ namespace SmartSpace.UI
         {
             if (string.IsNullOrEmpty(message)) return;
 
-            // If message contains non-ASCII characters that default TMP font cannot render,
-            // suppress the world-space 3D bubble to avoid square boxes, while HUD chat log shows full text.
-            bool hasNonAscii = false;
-            for (int i = 0; i < message.Length; i++)
-            {
-                if (message[i] > 127) { hasNonAscii = true; break; }
-            }
-            if (hasNonAscii) return;
 
             if (chatBubbleText != null)
             {

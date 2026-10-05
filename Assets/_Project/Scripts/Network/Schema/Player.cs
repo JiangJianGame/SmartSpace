@@ -38,5 +38,17 @@ namespace SmartSpace.Network.Schema {
 
 		[global::Colyseus.Schema.Type(8, "number")]
 		public double chatTime = 0;
+
+		[global::Colyseus.Schema.Type(9, "int8")]
+		public sbyte avatarId = 0;
+
+		[global::Colyseus.Schema.Type(10, "string")]
+		public string gender = "secret";
+
+		[global::Colyseus.Schema.Type(11, "int8")]
+		public sbyte age = 0;
+
+		[global::Colyseus.Schema.Type(12, "string")]
+		public string bio = "";
 	}
 }

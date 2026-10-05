@@ -47,6 +47,7 @@ export class PlazaRoom extends Room<{ state: PlazaState }> {
         this.broadcast("chatMessage", {
           senderId: client.sessionId,
           username: player.username,
+          avatarId: player.avatarId,
           message: cleanMsg,
           timestamp: Date.now()
         });
@@ -66,8 +67,10 @@ export class PlazaRoom extends Room<{ state: PlazaState }> {
         const payload = {
           senderId: client.sessionId,
           senderName: sender.username,
+          senderAvatarId: sender.avatarId,
           targetId: data.targetId,
           targetName: target.username,
+          targetAvatarId: target.avatarId,
           message: cleanMsg,
           isError: false,
           timestamp: Date.now()
@@ -84,11 +87,47 @@ export class PlazaRoom extends Room<{ state: PlazaState }> {
         client.send("whisperMessage", {
           senderId: "system",
           senderName: "系统",
+          senderAvatarId: 0,
           targetId: client.sessionId,
           targetName: sender.username,
+          targetAvatarId: 0,
           message: "目标玩家当前不在线或已离开广场。",
           isError: true,
           timestamp: Date.now()
+        });
+      }
+    });
+
+    // Register updateProfile handler
+    this.onMessage("updateProfile", (client: Client, data: { username?: string; avatarId?: number; gender?: string; age?: number; bio?: string }) => {
+      const player = this.state.players.get(client.sessionId);
+      if (player && data) {
+        if (typeof data.username === "string" && data.username.trim().length > 0) {
+          player.username = data.username.trim().substring(0, 16);
+        }
+        if (typeof data.avatarId === "number") {
+          player.avatarId = data.avatarId;
+        }
+        if (typeof data.gender === "string") {
+          player.gender = data.gender;
+        }
+        if (typeof data.age === "number") {
+          player.age = data.age;
+        }
+        if (typeof data.bio === "string") {
+          player.bio = data.bio.trim().substring(0, 60);
+        }
+
+        console.log(`[PlazaRoom] Profile updated for ${client.sessionId}: username=${player.username}, avatarId=${player.avatarId}, gender=${player.gender}, age=${player.age}`);
+
+        // Broadcast profile update event
+        this.broadcast("playerProfileUpdated", {
+          sessionId: client.sessionId,
+          username: player.username,
+          avatarId: player.avatarId,
+          gender: player.gender,
+          age: player.age,
+          bio: player.bio
         });
       }
     });
@@ -108,11 +147,18 @@ export class PlazaRoom extends Room<{ state: PlazaState }> {
   }
 
   onJoin(client: Client, options: any) {
-    console.log(`[PlazaRoom] Player joined: ${client.sessionId}`);
+    console.log(`[PlazaRoom] Player joined: ${client.sessionId}, options:`, options);
 
     const player = new Player();
     player.id = client.sessionId;
-    player.username = options.username || `User_${client.sessionId.substring(0, 4)}`;
+    player.username = (options && options.username && options.username.trim().length > 0)
+      ? options.username.trim().substring(0, 16)
+      : `User_${client.sessionId.substring(0, 4)}`;
+
+    player.avatarId = (options && typeof options.avatarId === "number") ? options.avatarId : 0;
+    player.gender = (options && typeof options.gender === "string") ? options.gender : "secret";
+    player.age = (options && typeof options.age === "number") ? options.age : 0;
+    player.bio = (options && typeof options.bio === "string") ? options.bio.trim().substring(0, 60) : "";
 
     // Slight random offset around origin for spawn point
     player.x = (Math.random() - 0.5) * 4;
