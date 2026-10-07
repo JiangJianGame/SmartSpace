@@ -13,7 +13,20 @@ namespace SmartSpace.UI
         System = 2,       // 系统 (系统文本)
         Whisper = 3,      // 私聊 (私聊记录)
         Horn = 4,         // 大喇叭 (全服喇叭)
-        Achievement = 5   // 成就播报 (荣誉广播)
+        Achievement = 5,  // 成就播报 (荣誉广播)
+        Friend = 6        // 好友 (好友聊天)
+    }
+
+    [Serializable]
+    public class ChatContact
+    {
+        public string id;
+        public string name;
+        public int avatarIndex;
+        public string gender; // "male", "female", "secret"
+        public int level;
+        public bool isOnline;
+        public string bio;
     }
 
     [Serializable]
@@ -66,10 +79,16 @@ namespace SmartSpace.UI
         private bool _shouldScrollToBottom = true;
         private bool _isNetworkEventsSubscribed = false;
 
-        // Whisper (私聊) State
+        // Whisper & Friend 3-Column State
         private string _whisperTargetId = "";
         private string _whisperTargetName = "";
         private bool _showPlayerSelectDropdown = false;
+
+        private readonly List<ChatContact> _friendsList = new List<ChatContact>();
+        private readonly List<ChatContact> _whisperContacts = new List<ChatContact>();
+        private string _selectedFriendId = "friend_xiuzhu";
+        private string _selectedFriendName = "休竹";
+        private Vector2 _contactScrollPosition = Vector2.zero;
 
         // Quick Emoji & Phrases Drawer State
         private bool _showQuickEmojiDrawer = false;
@@ -136,6 +155,19 @@ namespace SmartSpace.UI
         private GUIStyle _playerBarNameStyle;
         private GUIStyle _playerBarTagStyle;
 
+        // Middle Contact Column Styles (三段式布局联系人列表)
+        private GUIStyle _middleColStyle;
+        private GUIStyle _contactHeaderStyle;
+        private GUIStyle _contactSelectedStyle;
+        private GUIStyle _contactNormalStyle;
+        private GUIStyle _contactNameStyle;
+        private GUIStyle _contactStatusStyle;
+
+        private Texture2D _texMiddleColBg;
+        private Texture2D _texContactSelected;
+        private Texture2D _texContactNormal;
+        private Texture2D _texContactHover;
+
         private Texture2D _texMainBg;
         private Texture2D _texTabActive;
         private Texture2D _texTabInactive;
@@ -192,6 +224,199 @@ namespace SmartSpace.UI
         private void Awake()
         {
             _isExpanded = defaultExpanded;
+            InitDefaultFriends();
+            InitDefaultWhisperContacts();
+        }
+
+        private void InitDefaultFriends()
+        {
+            if (_friendsList.Count > 0) return;
+
+            // 1:1 matching user screenshot friends list:
+            _friendsList.Add(new ChatContact { id = "friend_yantou", name = "占得人间一味愚", avatarIndex = 5, gender = "female", level = 38, isOnline = true, bio = "星际探索进行时" });
+            _friendsList.Add(new ChatContact { id = "friend_xiuzhu", name = "休竹", avatarIndex = 1, gender = "male", level = 40, isOnline = true, bio = "光芒万丈，勇往直前！" });
+            _friendsList.Add(new ChatContact { id = "friend_liushuohan", name = "刘硕涵", avatarIndex = 4, gender = "male", level = 35, isOnline = true, bio = "战队集结，共赴星空！" });
+            _friendsList.Add(new ChatContact { id = "friend_huajianxue", name = "花间雪", avatarIndex = 2, gender = "female", level = 42, isOnline = true, bio = "在奥拉星智慧空间漫游~" });
+            _friendsList.Add(new ChatContact { id = "friend_liyuefeng", name = "李岳锋", avatarIndex = 3, gender = "male", level = 33, isOnline = true, bio = "热爱科技与智慧空间" });
+            _friendsList.Add(new ChatContact { id = "friend_xiaoaola", name = "小奥拉", avatarIndex = 0, gender = "male", level = 37, isOnline = true, bio = "很高兴与你成为好友！" });
+            _friendsList.Add(new ChatContact { id = "friend_linqiaobei", name = "林桥北", avatarIndex = 1, gender = "male", level = 30, isOnline = true, bio = "探索无限可能" });
+            _friendsList.Add(new ChatContact { id = "friend_afei", name = "多情的士兵阿飞", avatarIndex = 4, gender = "male", level = 29, isOnline = true, bio = "守护奥拉星和平！" });
+
+            if (string.IsNullOrEmpty(_selectedFriendId))
+            {
+                _selectedFriendId = "friend_xiuzhu";
+                _selectedFriendName = "休竹";
+            }
+
+            // Seed initial greeting message from 休竹 if no friend messages exist
+            if (!_messages.Exists(m => m.Channel == ChatChannel.Friend))
+            {
+                AddBubbleMessage(new ChatBubbleItem
+                {
+                    Channel = ChatChannel.Friend,
+                    SenderId = "friend_xiuzhu",
+                    SenderName = "休竹",
+                    TargetId = "self",
+                    TargetName = "我",
+                    Content = "你好呀！很高兴在奥拉星智慧空间与你成为好友！🌟",
+                    TimeStr = "12:10",
+                    IsSelf = false,
+                    AvatarIndex = 1,
+                    Level = 40,
+                    Timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() - 600000
+                }, false);
+            }
+        }
+
+        private void InitDefaultWhisperContacts()
+        {
+            if (_whisperContacts.Count > 0) return;
+
+            _whisperContacts.Add(new ChatContact { id = "bot_xiaoaola", name = "小奥拉", avatarIndex = 0, gender = "male", level = 37, isOnline = true, bio = "智慧空间向导" });
+            _whisperContacts.Add(new ChatContact { id = "friend_xiuzhu", name = "休竹", avatarIndex = 1, gender = "male", level = 40, isOnline = true, bio = "光芒万丈，勇往直前！" });
+
+            if (string.IsNullOrEmpty(_whisperTargetId))
+            {
+                _whisperTargetId = "bot_xiaoaola";
+                _whisperTargetName = "小奥拉";
+            }
+
+            // Seed initial whisper message if none exist
+            if (!_messages.Exists(m => m.Channel == ChatChannel.Whisper))
+            {
+                AddBubbleMessage(new ChatBubbleItem
+                {
+                    Channel = ChatChannel.Whisper,
+                    SenderId = "bot_xiaoaola",
+                    SenderName = "小奥拉",
+                    TargetId = "self",
+                    TargetName = "我",
+                    Content = "Hi！我是智慧空间向导小奥拉，随时可以向我发起私信哦！👋",
+                    TimeStr = "12:12",
+                    IsSelf = false,
+                    AvatarIndex = 0,
+                    Level = 37,
+                    Timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() - 500000
+                }, false);
+            }
+        }
+
+        private void SyncOnlinePlayersToContacts()
+        {
+            if (NetworkManager.Instance == null) return;
+            string myId = NetworkManager.Instance.SessionId;
+
+            foreach (var kvp in NetworkManager.Instance.OnlinePlayers)
+            {
+                if (kvp.Key == myId) continue;
+
+                if (!_whisperContacts.Exists(c => c.id == kvp.Key))
+                {
+                    int avId = 1;
+                    string gender = "male";
+                    int lvl = 1;
+                    if (NetworkManager.Instance.OnlineProfiles.TryGetValue(kvp.Key, out var prof))
+                    {
+                        avId = prof.avatarId;
+                        gender = prof.gender;
+                        lvl = prof.level;
+                    }
+
+                    _whisperContacts.Add(new ChatContact
+                    {
+                        id = kvp.Key,
+                        name = kvp.Value,
+                        avatarIndex = avId,
+                        gender = gender,
+                        level = lvl,
+                        isOnline = true,
+                        bio = "在线玩家"
+                    });
+                }
+            }
+        }
+
+        public void AddFriendFromProfile(string sessionId, UserProfile profile)
+        {
+            if (profile == null) return;
+            if (_friendsList.Exists(f => f.id == sessionId || f.name == profile.username))
+            {
+                AddSystemMessage($"<color=#FFD54F>玩家 [{profile.username}] 已经在你的好友列表中啦！</color>");
+                return;
+            }
+
+            _friendsList.Insert(0, new ChatContact
+            {
+                id = sessionId,
+                name = profile.username,
+                avatarIndex = profile.avatarId,
+                gender = profile.gender,
+                level = profile.level,
+                isOnline = true,
+                bio = profile.bio
+            });
+
+            AddSystemMessage($"<color=#00E676>已成功将 [{profile.username}] 添加为好友！</color>");
+        }
+
+        private System.Collections.IEnumerator SimulateFriendReplyRoutine(string friendId, string friendName)
+        {
+            yield return new WaitForSeconds(1.2f);
+
+            string[] replies = friendName switch
+            {
+                "休竹" => new string[]
+                {
+                    "收到！今天广场真热闹，要一起去漫游探险吗？🚀",
+                    "光芒万丈，勇往直前！在奥拉星智慧空间一起冲！✨",
+                    "哈哈，很高兴和你成为好友，随时找我玩呀！🌟"
+                },
+                "花间雪" => new string[]
+                {
+                    "哇，收到你的消息啦！今天空间漫游感觉超棒的～🌸",
+                    "你好你好！广场风景超赞的，随时来找我聊天哦～😊"
+                },
+                "刘硕涵" => new string[]
+                {
+                    "战队集结完毕，随时准备出发！🔥",
+                    "收到消息！空间里的互动设施体验过了吗？很赞！👍"
+                },
+                "占得人间一味愚" => new string[]
+                {
+                    "星际探索中，收到你的好友问候啦！💫",
+                    "愿我们在智慧空间探索更多奇迹！✨"
+                },
+                _ => new string[]
+                {
+                    "收到你的好友消息啦！很高兴和你聊天～👋",
+                    "在智慧空间漫游真有趣，改天一起打卡拍照呀！📸"
+                }
+            };
+            string reply = replies[UnityEngine.Random.Range(0, replies.Length)];
+
+            int avId = 1;
+            int lvl = 40;
+            var contact = _friendsList.Find(c => c.id == friendId);
+            if (contact != null)
+            {
+                avId = contact.avatarIndex;
+                lvl = contact.level;
+            }
+
+            AddBubbleMessage(new ChatBubbleItem
+            {
+                Channel = ChatChannel.Friend,
+                SenderId = friendId,
+                SenderName = friendName,
+                TargetId = NetworkManager.Instance != null ? NetworkManager.Instance.SessionId : "self",
+                TargetName = NetworkManager.Instance != null && NetworkManager.Instance.LocalProfile != null ? NetworkManager.Instance.LocalProfile.username : "我",
+                Content = reply,
+                TimeStr = DateTime.Now.ToString("HH:mm"),
+                IsSelf = false,
+                AvatarIndex = avId,
+                Level = lvl,
+                Timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
+            });
         }
 
         private void OnEnable()
@@ -280,6 +505,8 @@ namespace SmartSpace.UI
             {
                 SubscribeNetworkEvents();
             }
+
+            SyncOnlinePlayersToContacts();
 
             // Toggle Expand/Collapse with 'C' key when not focused in any input
             if (Input.GetKeyDown(KeyCode.C) && !IsTyping)
@@ -792,6 +1019,10 @@ namespace SmartSpace.UI
             if (_texModalCardBg != null) Destroy(_texModalCardBg);
             if (_texInputDark != null) Destroy(_texInputDark);
             if (_texPlayerBarBg != null) Destroy(_texPlayerBarBg);
+            if (_texMiddleColBg != null) Destroy(_texMiddleColBg);
+            if (_texContactSelected != null) Destroy(_texContactSelected);
+            if (_texContactNormal != null) Destroy(_texContactNormal);
+            if (_texContactHover != null) Destroy(_texContactHover);
 
             if (_avatarTextures != null)
             {
@@ -1190,6 +1421,61 @@ namespace SmartSpace.UI
                 hover = { textColor = Color.white, background = _texTabActive }
             };
 
+            // Middle Contact Column Styles (三段式布局联系人列表)
+            _texMiddleColBg = MakeBorderedTex(32, 32, new Color(0.04f, 0.07f, 0.14f, 0.96f), new Color(0.12f, 0.22f, 0.36f, 0.80f), 1);
+            _texContactSelected = MakeBorderedTex(32, 32, new Color(0.10f, 0.22f, 0.44f, 0.95f), new Color(1.0f, 0.84f, 0.22f, 1.0f), 2);
+            _texContactNormal = MakeBorderedTex(32, 32, new Color(0.06f, 0.10f, 0.18f, 0.70f), new Color(0.10f, 0.18f, 0.30f, 0.50f), 1);
+            _texContactHover = MakeBorderedTex(32, 32, new Color(0.10f, 0.20f, 0.36f, 0.90f), new Color(0.20f, 0.50f, 0.90f, 0.90f), 1);
+
+            _middleColStyle = new GUIStyle(GUI.skin.box)
+            {
+                normal = { background = _texMiddleColBg },
+                padding = new RectOffset(4, 4, 4, 4)
+            };
+
+            _contactHeaderStyle = new GUIStyle(GUI.skin.label)
+            {
+                fontSize = 12,
+                fontStyle = FontStyle.Bold,
+                alignment = TextAnchor.MiddleCenter,
+                richText = true,
+                normal = { textColor = new Color(0.70f, 0.88f, 1.0f) },
+                padding = new RectOffset(2, 2, 4, 4)
+            };
+
+            _contactSelectedStyle = new GUIStyle(GUI.skin.button)
+            {
+                normal = { background = _texContactSelected },
+                hover = { background = _texContactSelected },
+                padding = new RectOffset(0, 0, 0, 0)
+            };
+
+            _contactNormalStyle = new GUIStyle(GUI.skin.button)
+            {
+                normal = { background = _texContactNormal },
+                hover = { background = _texContactHover },
+                padding = new RectOffset(0, 0, 0, 0)
+            };
+
+            _contactNameStyle = new GUIStyle(GUI.skin.label)
+            {
+                fontSize = 12,
+                fontStyle = FontStyle.Bold,
+                alignment = TextAnchor.MiddleLeft,
+                richText = true,
+                clipping = TextClipping.Clip,
+                padding = new RectOffset(0, 0, 0, 0)
+            };
+
+            _contactStatusStyle = new GUIStyle(GUI.skin.label)
+            {
+                fontSize = 10,
+                alignment = TextAnchor.MiddleLeft,
+                richText = true,
+                clipping = TextClipping.Clip,
+                padding = new RectOffset(0, 0, 0, 0)
+            };
+
             _stylesInitialized = true;
         }
 
@@ -1303,12 +1589,16 @@ namespace SmartSpace.UI
         private void DrawAolaStarChatWindow()
         {
             float panelHeight = Mathf.Max(420f, Screen.height * (2f / 3f));
-            float panelWidth = Mathf.Clamp(Screen.width * 0.35f, 450f, 520f);
+            bool isThreeColumn = (_currentChannel == ChatChannel.Friend || _currentChannel == ChatChannel.Whisper);
+            float minW = isThreeColumn ? 600f : 450f;
+            float maxW = isThreeColumn ? 750f : 520f;
+            float panelWidth = Mathf.Clamp(Screen.width * (isThreeColumn ? 0.48f : 0.35f), minW, maxW);
             float panelX = 16f;
             float panelY = Screen.height - panelHeight - 16f;
 
-            float tabColWidth = 72f;
-            float chatAreaWidth = panelWidth - tabColWidth;
+            float tabColWidth = 64f;
+            float middleColWidth = isThreeColumn ? 145f : 0f;
+            float chatAreaWidth = panelWidth - tabColWidth - middleColWidth;
 
             GUILayout.BeginArea(new Rect(panelX, panelY, panelWidth, panelHeight), _mainPanelStyle);
 
@@ -1319,39 +1609,50 @@ namespace SmartSpace.UI
             GUILayout.BeginVertical();
 
             DrawVerticalChannelTab("世界", ChatChannel.World);
+            DrawVerticalChannelTab("好友", ChatChannel.Friend);
+            DrawVerticalChannelTab("私聊", ChatChannel.Whisper);
             DrawVerticalChannelTab("附近", ChatChannel.Nearby);
             DrawVerticalChannelTab("系统", ChatChannel.System);
-            DrawVerticalChannelTab("私聊", ChatChannel.Whisper);
 
             GUILayout.FlexibleSpace();
             GUILayout.EndVertical();
             GUILayout.EndArea();
 
             // -------------------------------------------------------------
-            // B. RIGHT CHAT CONTENT AREAS (顶部栏 / 消息滚动区 / 底部输入栏 / 悬浮表情弹窗)
+            // B. MIDDLE TARGET SELECTOR (中间栏：好友/私聊联系人列表)
+            // 仅在好友和私聊模式下显示，构成三段式布局
+            // -------------------------------------------------------------
+            if (isThreeColumn)
+            {
+                DrawMiddleContactColumn(tabColWidth, 0, middleColWidth, panelHeight);
+            }
+
+            // -------------------------------------------------------------
+            // C. RIGHT CHAT CONTENT AREAS (最右侧：聊天信息窗口)
             // 采用绝对分层锚定：底栏与滚动区位置绝对恒定，表情弹窗作为悬浮 Overlay 浮动在底栏上方，
             // 彻底杜绝流式布局累积误差，确保输入框在任何状态下绝不移动、绝不错位！
             // -------------------------------------------------------------
+            float chatAreaX = tabColWidth + middleColWidth;
             float topHeaderH = 32f;
             float inputBarH = 50f;
             float inputBarY = panelHeight - inputBarH - 6f; // 固定锚定在面板底部，位置永不改变
 
-            // B1. Top Header Bar (高度严格固定 32px，私聊目标与快捷操作同层并列)
-            GUILayout.BeginArea(new Rect(tabColWidth, 0, chatAreaWidth, topHeaderH));
-            DrawTopHeaderBar();
+            // C1. Top Header Bar (高度严格固定 32px，私聊目标与快捷操作同层并列)
+            GUILayout.BeginArea(new Rect(chatAreaX, 0, chatAreaWidth, topHeaderH));
+            DrawTopHeaderBar(chatAreaWidth);
             GUILayout.EndArea();
 
-            // B2. Bottom Input Area (先绘制底部输入栏，确保其 Control ID 永远固定，位置绝对恒定)
-            GUILayout.BeginArea(new Rect(tabColWidth, inputBarY, chatAreaWidth, inputBarH));
+            // C2. Bottom Input Area (先绘制底部输入栏，确保其 Control ID 永远固定，位置绝对恒定)
+            GUILayout.BeginArea(new Rect(chatAreaX, inputBarY, chatAreaWidth, inputBarH));
             DrawBottomInputBar(chatAreaWidth);
             GUILayout.EndArea();
 
-            // B3. Scrollable Bubble Messages Area (高度稳定限定在顶部栏与底部输入栏之间)
+            // C3. Scrollable Bubble Messages Area (高度稳定限定在顶部栏与底部输入栏之间)
             float scrollY = topHeaderH + 2f;
             float scrollH = inputBarY - scrollY - 4f;
             if (scrollH < 100f) scrollH = 100f;
 
-            GUILayout.BeginArea(new Rect(tabColWidth, scrollY, chatAreaWidth, scrollH));
+            GUILayout.BeginArea(new Rect(chatAreaX, scrollY, chatAreaWidth, scrollH));
             _scrollPosition = GUILayout.BeginScrollView(
                 _scrollPosition,
                 false,
@@ -1382,9 +1683,17 @@ namespace SmartSpace.UI
                 {
                     shouldShow = (msg.Channel == ChatChannel.System || msg.Channel == ChatChannel.Achievement);
                 }
+                else if (_currentChannel == ChatChannel.Friend)
+                {
+                    shouldShow = (msg.Channel == ChatChannel.Friend && 
+                                  !string.IsNullOrEmpty(_selectedFriendId) &&
+                                  (msg.SenderId == _selectedFriendId || msg.TargetId == _selectedFriendId));
+                }
                 else if (_currentChannel == ChatChannel.Whisper)
                 {
-                    shouldShow = (msg.Channel == ChatChannel.Whisper);
+                    shouldShow = (msg.Channel == ChatChannel.Whisper &&
+                                  !string.IsNullOrEmpty(_whisperTargetId) &&
+                                  (msg.SenderId == _whisperTargetId || msg.TargetId == _whisperTargetId));
                 }
 
                 if (shouldShow)
@@ -1413,7 +1722,12 @@ namespace SmartSpace.UI
             {
                 string emptyHint = _currentChannel switch
                 {
-                    ChatChannel.Whisper => "<color=#78909C>暂无私聊消息。点击上方[选择目标]发起私聊...</color>",
+                    ChatChannel.Friend => string.IsNullOrEmpty(_selectedFriendId) 
+                        ? "<color=#78909C>请在左侧列表中选择好友开始聊天...</color>" 
+                        : $"<color=#78909C>暂无与 [{_selectedFriendName}] 的聊天记录，发条消息打个招呼吧！</color>",
+                    ChatChannel.Whisper => string.IsNullOrEmpty(_whisperTargetId) 
+                        ? "<color=#78909C>请在左侧列表中选择私聊对象...</color>" 
+                        : $"<color=#78909C>暂无与 [{_whisperTargetName}] 的私聊记录，发条消息打个招呼吧！</color>",
                     ChatChannel.System => "<color=#78909C>暂无系统公告记录。</color>",
                     _ => "<color=#78909C>暂无发言记录，快在下方输入与大家打招呼吧！</color>"
                 };
@@ -1429,12 +1743,12 @@ namespace SmartSpace.UI
             GUILayout.EndScrollView();
             GUILayout.EndArea();
 
-            // B4. Quick Emoji & Phrases Drawer (悬浮弹窗 Overlay：浮动于输入栏正上方，不挤压底栏)
+            // C4. Quick Emoji & Phrases Drawer (悬浮弹窗 Overlay：浮动于输入栏正上方，不挤压底栏)
             if (_showQuickEmojiDrawer)
             {
                 float drawerW = chatAreaWidth - 8f;
                 float drawerH = 125f;
-                float drawerX = tabColWidth + 4f;
+                float drawerX = chatAreaX + 4f;
                 float drawerY = inputBarY - drawerH - 2f;
                 Rect drawerRect = new Rect(drawerX, drawerY, drawerW, drawerH);
 
@@ -1443,7 +1757,7 @@ namespace SmartSpace.UI
                 GUILayout.EndArea();
 
                 // 点击弹窗外部（且非底部输入栏区域）时平滑收起，按 Esc 也收起
-                Rect inputBarRect = new Rect(tabColWidth, inputBarY, chatAreaWidth, inputBarH);
+                Rect inputBarRect = new Rect(chatAreaX, inputBarY, chatAreaWidth, inputBarH);
                 Event currentEvt = Event.current;
                 if ((currentEvt.type == EventType.MouseDown && 
                      !drawerRect.Contains(currentEvt.mousePosition) && 
@@ -1463,48 +1777,101 @@ namespace SmartSpace.UI
             }
         }
 
+        private void DrawMiddleContactColumn(float colX, float colY, float colW, float colH)
+        {
+            GUILayout.BeginArea(new Rect(colX, colY, colW, colH), _middleColStyle);
+            GUILayout.BeginVertical();
+
+            // 1. Column Header (28px)
+            string headerText = _currentChannel == ChatChannel.Friend 
+                ? $"👥 <b>好友列表</b> ({_friendsList.Count})" 
+                : $"💬 <b>私聊对象</b> ({_whisperContacts.Count})";
+            GUILayout.Label(headerText, _contactHeaderStyle, GUILayout.Height(28));
+            GUILayout.Space(2);
+
+            // 2. Scrollable Contact Cards
+            _contactScrollPosition = GUILayout.BeginScrollView(
+                _contactScrollPosition, 
+                false, 
+                false, 
+                GUILayout.Width(colW - 8), 
+                GUILayout.Height(colH - 38)
+            );
+
+            List<ChatContact> contacts = _currentChannel == ChatChannel.Friend ? _friendsList : _whisperContacts;
+            string selectedId = _currentChannel == ChatChannel.Friend ? _selectedFriendId : _whisperTargetId;
+
+            for (int i = 0; i < contacts.Count; i++)
+            {
+                var contact = contacts[i];
+                bool isSelected = (contact.id == selectedId);
+                GUIStyle cardStyle = isSelected ? _contactSelectedStyle : _contactNormalStyle;
+
+                Rect cardRect = GUILayoutUtility.GetRect(colW - 14, 46, GUILayout.Width(colW - 14), GUILayout.Height(46));
+                if (GUI.Button(cardRect, GUIContent.none, cardStyle))
+                {
+                    if (_currentChannel == ChatChannel.Friend)
+                    {
+                        _selectedFriendId = contact.id;
+                        _selectedFriendName = contact.name;
+                    }
+                    else
+                    {
+                        _whisperTargetId = contact.id;
+                        _whisperTargetName = contact.name;
+                    }
+                    _shouldScrollToBottom = true;
+                }
+
+                // Draw Avatar on left (32x32)
+                Texture2D avTex = GetAvatarTex(contact.avatarIndex);
+                Rect avRect = new Rect(cardRect.x + 5, cardRect.y + 7, 32, 32);
+                GUI.DrawTexture(avRect, avTex, ScaleMode.ScaleToFit);
+
+                // Draw Name on right
+                string nameColor = isSelected ? "#FFE082" : "#ECEFF1";
+                Rect nameRect = new Rect(cardRect.x + 42, cardRect.y + 5, cardRect.width - 46, 18);
+                GUI.Label(nameRect, $"<color={nameColor}><b>{contact.name}</b></color>", _contactNameStyle);
+
+                // Draw Gender & Level & Status
+                string genderIcon = contact.gender == "female" ? "<color=#FF4081>♀</color>" : "<color=#40C4FF>♂</color>";
+                string statusDot = contact.isOnline ? "<color=#00E676>●</color>" : "<color=#78909C>○</color>";
+                Rect infoRect = new Rect(cardRect.x + 42, cardRect.y + 24, cardRect.width - 46, 16);
+                GUI.Label(infoRect, $"{genderIcon} <size=10><color=#90A4AE>Lv.{contact.level}</color></size> {statusDot}", _contactStatusStyle);
+
+                GUILayout.Space(3);
+            }
+
+            GUILayout.EndScrollView();
+            GUILayout.EndVertical();
+            GUILayout.EndArea();
+        }
+
         private void DrawVerticalChannelTab(string label, ChatChannel channel)
         {
             bool isActive = (_currentChannel == channel);
             GUIStyle style = isActive ? _tabActiveStyle : _tabInactiveStyle;
-            if (GUILayout.Button(label, style, GUILayout.Height(52)))
+            if (GUILayout.Button(label, style, GUILayout.Height(46)))
             {
                 _currentChannel = channel;
                 _shouldScrollToBottom = true;
             }
         }
 
-        private void DrawTopHeaderBar()
+        private void DrawTopHeaderBar(float contentWidth)
         {
             GUILayout.BeginHorizontal(GUILayout.Height(28));
             GUILayout.Space(4);
 
-            if (_currentChannel == ChatChannel.Whisper)
+            if (_currentChannel == ChatChannel.Friend)
             {
-                GUILayout.Label("<color=#FF4081><b>● 私聊</b></color>", _senderNameOtherStyle, GUILayout.Height(24));
-                GUILayout.Space(4);
-
-                if (!string.IsNullOrEmpty(_whisperTargetId))
-                {
-                    string targetBtnText = $"对: <color=#80D8FF><b>{_whisperTargetName}</b></color> ▼";
-                    if (GUILayout.Button(targetBtnText, _sideActionBtnStyle, GUILayout.Height(22)))
-                    {
-                        _showPlayerSelectDropdown = !_showPlayerSelectDropdown;
-                    }
-                    if (GUILayout.Button("✕", _sideActionBtnStyle, GUILayout.Width(20), GUILayout.Height(22)))
-                    {
-                        _whisperTargetId = "";
-                        _whisperTargetName = "";
-                        _showPlayerSelectDropdown = false;
-                    }
-                }
-                else
-                {
-                    if (GUILayout.Button("选择目标 ▼", _sideActionBtnStyle, GUILayout.Height(22)))
-                    {
-                        _showPlayerSelectDropdown = !_showPlayerSelectDropdown;
-                    }
-                }
+                string targetName = !string.IsNullOrEmpty(_selectedFriendName) ? _selectedFriendName : "选择好友";
+                GUILayout.Label($"<color=#80D8FF><b>正在与 {targetName} 聊天</b></color>", _senderNameOtherStyle, GUILayout.Height(24));
+            }
+            else if (_currentChannel == ChatChannel.Whisper)
+            {
+                string targetName = !string.IsNullOrEmpty(_whisperTargetName) ? _whisperTargetName : "选择目标";
+                GUILayout.Label($"<color=#FF80AB><b>正在与 {targetName} 私聊</b></color>", _senderNameOtherStyle, GUILayout.Height(24));
             }
             else
             {
@@ -1521,22 +1888,25 @@ namespace SmartSpace.UI
             GUILayout.FlexibleSpace();
 
             // 右上角操作按钮: 喇叭 / 轮盘 / 访客 / 收起
-            if (GUILayout.Button("📢 喇叭", _sideActionBtnStyle, GUILayout.Width(58), GUILayout.Height(24)))
+            if (_currentChannel != ChatChannel.Friend && _currentChannel != ChatChannel.Whisper)
             {
-                _inputChat = "/horn ";
-                GUI.FocusControl("AolaChatInputField");
+                if (GUILayout.Button("📢 喇叭", _sideActionBtnStyle, GUILayout.Width(58), GUILayout.Height(24)))
+                {
+                    _inputChat = "/horn ";
+                    GUI.FocusControl("AolaChatInputField");
+                }
+
+                GUILayout.Space(4);
+
+                if (GUILayout.Button("🎡 轮盘", _sideActionBtnStyle, GUILayout.Width(58), GUILayout.Height(24)))
+                {
+                    if (EmoteWheelUI.Instance != null) EmoteWheelUI.Instance.OpenWheel();
+                }
+
+                GUILayout.Space(4);
             }
 
-            GUILayout.Space(4);
-
-            if (GUILayout.Button("🎡 轮盘", _sideActionBtnStyle, GUILayout.Width(58), GUILayout.Height(24)))
-            {
-                if (EmoteWheelUI.Instance != null) EmoteWheelUI.Instance.OpenWheel();
-            }
-
-            GUILayout.Space(4);
-
-            if (GUILayout.Button("🤖 访客", _sideActionBtnStyle, GUILayout.Width(58), GUILayout.Height(24)))
+            if (GUILayout.Button("🤖 访客", _sideActionBtnStyle, GUILayout.Width(54), GUILayout.Height(24)))
             {
                 if (NetworkManager.Instance != null && NetworkManager.Instance.IsConnected)
                 {
@@ -1790,9 +2160,13 @@ namespace SmartSpace.UI
             if (Event.current.type == EventType.Repaint && string.IsNullOrEmpty(_inputChat) && !isFocused)
             {
                 string hint = "点击输入...";
-                if (_currentChannel == ChatChannel.Whisper)
+                if (_currentChannel == ChatChannel.Friend)
                 {
-                    hint = string.IsNullOrEmpty(_whisperTargetId) ? "点击输入 (请先在顶部选择目标)..." : $"对 [{_whisperTargetName}] 说...";
+                    hint = string.IsNullOrEmpty(_selectedFriendId) ? "点击输入 (请先在左侧选择好友)..." : $"对 [{_selectedFriendName}] 说...";
+                }
+                else if (_currentChannel == ChatChannel.Whisper)
+                {
+                    hint = string.IsNullOrEmpty(_whisperTargetId) ? "点击输入 (请先在左侧选择目标)..." : $"对 [{_whisperTargetName}] 说...";
                 }
                 _placeholderStyle.Draw(new Rect(inputRect.x + 8, inputRect.y + 7, inputRect.width - 16, 20), hint, false, false, false, false);
             }
@@ -1990,12 +2364,52 @@ namespace SmartSpace.UI
                 }
             }
 
-            if (_currentChannel == ChatChannel.Whisper)
+            if (_currentChannel == ChatChannel.Friend)
+            {
+                if (string.IsNullOrEmpty(_selectedFriendId))
+                {
+                    AddSystemMessage("<color=#FF5252>请先在左侧选择要聊天的好友！</color>");
+                    return false;
+                }
+
+                string myId = NetworkManager.Instance != null ? NetworkManager.Instance.SessionId : "self";
+                string myName = NetworkManager.Instance != null && NetworkManager.Instance.LocalProfile != null 
+                    ? NetworkManager.Instance.LocalProfile.username 
+                    : "我";
+                int myAvatar = NetworkManager.Instance != null && NetworkManager.Instance.LocalProfile != null 
+                    ? NetworkManager.Instance.LocalProfile.avatarId 
+                    : 0;
+
+                AddBubbleMessage(new ChatBubbleItem
+                {
+                    Channel = ChatChannel.Friend,
+                    SenderId = myId,
+                    SenderName = myName,
+                    TargetId = _selectedFriendId,
+                    TargetName = _selectedFriendName,
+                    Content = content,
+                    TimeStr = DateTime.Now.ToString("HH:mm"),
+                    IsSelf = true,
+                    AvatarIndex = myAvatar,
+                    Level = NetworkManager.Instance != null && NetworkManager.Instance.LocalProfile != null ? NetworkManager.Instance.LocalProfile.level : 1,
+                    Timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
+                });
+
+                if (NetworkManager.Instance != null && NetworkManager.Instance.OnlinePlayers.ContainsKey(_selectedFriendId))
+                {
+                    NetworkManager.Instance.SendWhisper(_selectedFriendId, content);
+                }
+                else
+                {
+                    StartCoroutine(SimulateFriendReplyRoutine(_selectedFriendId, _selectedFriendName));
+                }
+                return true;
+            }
+            else if (_currentChannel == ChatChannel.Whisper)
             {
                 if (string.IsNullOrEmpty(_whisperTargetId))
                 {
-                    AddSystemMessage("<color=#FF5252>请先选择私聊目标玩家！</color>");
-                    _showPlayerSelectDropdown = true;
+                    AddSystemMessage("<color=#FF5252>请先在左侧选择私聊目标玩家！</color>");
                     return false;
                 }
 
@@ -2023,6 +2437,7 @@ namespace SmartSpace.UI
                 string chTag = latest.Channel switch
                 {
                     ChatChannel.World => "<color=#1E88E5>[世界]</color>",
+                    ChatChannel.Friend => "<color=#00E5FF>[好友]</color>",
                     ChatChannel.Nearby => "<color=#00E5FF>[附近]</color>",
                     ChatChannel.Whisper => "<color=#FF4081>[私聊]</color>",
                     ChatChannel.System => "<color=#76FF03>[系统]</color>",
@@ -2478,7 +2893,7 @@ namespace SmartSpace.UI
 
             GUILayout.FlexibleSpace();
 
-            // Bottom Actions: Whisper or Close
+            // Bottom Actions: Whisper or Add Friend or Close
             GUILayout.BeginHorizontal();
             if (GUILayout.Button("💬  发起私聊", _modalPrimaryBtnStyle, GUILayout.Height(38)))
             {
@@ -2490,9 +2905,22 @@ namespace SmartSpace.UI
                 _shouldScrollToBottom = true;
             }
 
-            GUILayout.Space(8);
+            GUILayout.Space(6);
 
-            if (GUILayout.Button("关 闭", _modalSecondaryBtnStyle, GUILayout.Width(90), GUILayout.Height(38)))
+            if (GUILayout.Button("🤝  加为好友", _modalPrimaryBtnStyle, GUILayout.Height(38)))
+            {
+                AddFriendFromProfile(_targetProfileSessionId, _targetProfile);
+                _selectedFriendId = _targetProfileSessionId;
+                _selectedFriendName = _targetProfile.username;
+                _currentChannel = ChatChannel.Friend;
+                _showTargetProfileModal = false;
+                _isExpanded = true;
+                _shouldScrollToBottom = true;
+            }
+
+            GUILayout.Space(6);
+
+            if (GUILayout.Button("关 闭", _modalSecondaryBtnStyle, GUILayout.Width(76), GUILayout.Height(38)))
             {
                 _showTargetProfileModal = false;
             }
