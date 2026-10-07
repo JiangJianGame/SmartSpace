@@ -97,6 +97,16 @@ namespace SmartSpace.Character
                 _velocity.y = -2f; // Slight downward push to keep grounded
             }
 
+            if (SmartSpace.UI.DemoHUD.IsTyping)
+            {
+                _velocity.x = 0;
+                _velocity.z = 0;
+                if (_currentAnimState < 10) _currentAnimState = 0;
+                _velocity.y += gravity * Time.deltaTime;
+                _controller.Move(_velocity * Time.deltaTime);
+                return;
+            }
+
             // Input
             float horizontal = Input.GetAxisRaw("Horizontal");
             float vertical = Input.GetAxisRaw("Vertical");

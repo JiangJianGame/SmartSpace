@@ -42,6 +42,9 @@ namespace SmartSpace.UI
         [SerializeField] private bool defaultExpanded = true;
         [SerializeField] private int maxHistoryCount = 80;
 
+        public static bool IsTyping { get; private set; }
+        private bool _isChatInputFocused = false;
+
         private bool _isExpanded = true;
         private ChatChannel _currentChannel = ChatChannel.World;
         private string _inputChat = "";
@@ -184,7 +187,6 @@ namespace SmartSpace.UI
             if (NetworkManager.Instance != null)
             {
                 NetworkManager.Instance.OnConnectionStateChanged += HandleConnectionStateChanged;
-                NetworkManager.Instance.OnChatMessageReceived += HandleChatMessage;
                 NetworkManager.Instance.OnChatMessageWithAvatarReceived += HandleChatMessageWithAvatar;
                 NetworkManager.Instance.OnWhisperMessageReceived += HandleWhisperMessage;
                 NetworkManager.Instance.OnPlayerJoined += HandlePlayerJoined;
@@ -202,7 +204,6 @@ namespace SmartSpace.UI
             if (NetworkManager.Instance != null)
             {
                 NetworkManager.Instance.OnConnectionStateChanged -= HandleConnectionStateChanged;
-                NetworkManager.Instance.OnChatMessageReceived -= HandleChatMessage;
                 NetworkManager.Instance.OnChatMessageWithAvatarReceived -= HandleChatMessageWithAvatar;
                 NetworkManager.Instance.OnWhisperMessageReceived -= HandleWhisperMessage;
                 NetworkManager.Instance.OnPlayerJoined -= HandlePlayerJoined;
@@ -215,8 +216,7 @@ namespace SmartSpace.UI
         private void Update()
         {
             // Toggle Expand/Collapse with 'C' key when not focused in any input
-            bool isTyping = GUI.GetNameOfFocusedControl() == "AolaChatInputField" || _showInitialSetupModal || _showSelfProfileModal;
-            if (Input.GetKeyDown(KeyCode.C) && !isTyping)
+            if (Input.GetKeyDown(KeyCode.C) && !IsTyping)
             {
                 ToggleExpand();
             }
@@ -862,6 +862,10 @@ namespace SmartSpace.UI
         {
             InitStyles();
 
+            // Track chat input focus & typing state for input protection
+            _isChatInputFocused = (GUI.GetNameOfFocusedControl() == "AolaChatInputField");
+            IsTyping = _isChatInputFocused || _showInitialSetupModal || _showSelfProfileModal;
+
             // 1. Top-Left Player Profile Bar (可查看与点击修改个人资料)
             DrawPlayerProfileBar();
 
@@ -1000,7 +1004,25 @@ namespace SmartSpace.UI
             DrawTopHeaderBar();
             GUILayout.EndArea();
 
-            // B2. Scrollable Bubble Messages Area (高度严格限定在顶部栏与底部栏之间)
+            // B2. Bottom Input Area (先绘制底部输入栏，确保其 Control ID 永远固定，绝不受消息数量增减影响导致输入框焦点丢失或文本被清空！)
+            float bottomAreaY = panelHeight - bottomReservedH;
+            GUILayout.BeginArea(new Rect(tabColWidth, bottomAreaY, chatAreaWidth, bottomReservedH));
+            GUILayout.BeginVertical();
+
+            // Quick Emoji & Phrases Drawer (if opened)
+            if (_showQuickEmojiDrawer)
+            {
+                DrawQuickEmojiDrawer();
+                GUILayout.Space(2);
+            }
+
+            // Bottom Input Bar
+            DrawBottomInputBar(chatAreaWidth);
+
+            GUILayout.EndVertical();
+            GUILayout.EndArea();
+
+            // B3. Scrollable Bubble Messages Area (高度严格限定在顶部栏与底部栏之间)
             GUILayout.BeginArea(new Rect(tabColWidth, topHeaderH, chatAreaWidth, scrollH));
             _scrollPosition = GUILayout.BeginScrollView(
                 _scrollPosition,
@@ -1061,24 +1083,6 @@ namespace SmartSpace.UI
             }
 
             GUILayout.EndScrollView();
-            GUILayout.EndArea();
-
-            // B3. Bottom Input Area (严格锚定在面板底部，输入框在任何频道下 Y 坐标绝对锁定！)
-            float bottomAreaY = panelHeight - bottomReservedH;
-            GUILayout.BeginArea(new Rect(tabColWidth, bottomAreaY, chatAreaWidth, bottomReservedH));
-            GUILayout.BeginVertical();
-
-            // Quick Emoji & Phrases Drawer (if opened)
-            if (_showQuickEmojiDrawer)
-            {
-                DrawQuickEmojiDrawer();
-                GUILayout.Space(2);
-            }
-
-            // Bottom Input Bar
-            DrawBottomInputBar(chatAreaWidth);
-
-            GUILayout.EndVertical();
             GUILayout.EndArea();
 
             GUILayout.EndArea(); // Close panel main area
@@ -1295,32 +1299,36 @@ namespace SmartSpace.UI
             // Intercept Enter key for sending before TextArea inserts a newline (Shift+Enter to add newline)
             Event e = Event.current;
             bool isFocused = (GUI.GetNameOfFocusedControl() == "AolaChatInputField");
-            bool pressEnter = (e.type == EventType.KeyDown && (e.keyCode == KeyCode.Return || e.keyCode == KeyCode.KeypadEnter) && isFocused && !e.shift);
+            bool hasComposition = !string.IsNullOrEmpty(Input.compositionString);
+            bool pressEnter = (e.type == EventType.KeyDown && (e.keyCode == KeyCode.Return || e.keyCode == KeyCode.KeypadEnter) && isFocused && !e.shift && !hasComposition);
 
             if (pressEnter)
             {
                 e.Use();
                 if (!string.IsNullOrEmpty(_inputChat.Trim()))
                 {
-                    SendMessageContent(_inputChat.Trim());
-                    _inputChat = "";
-                    GUI.FocusControl(null);
+                    if (SendMessageContent(_inputChat.Trim()))
+                    {
+                        _inputChat = "";
+                        GUI.FocusControl(null);
+                    }
                 }
             }
 
-            // 1. White Rounded Input Box (固定舒适高度，绝对锁定位置，绝不抖动)
+            // 1. White Rounded Input Box (使用 GUILayout.TextArea 保证布局流稳定，容量扩至 200 字)
             GUI.SetNextControlName("AolaChatInputField");
-            Rect inputRect = GUILayoutUtility.GetRect(inputW, inputBarH, GUILayout.Width(inputW), GUILayout.Height(inputBarH));
-            _inputChat = GUI.TextArea(inputRect, _inputChat, 120, _inputFieldStyle);
+            _inputChat = GUILayout.TextArea(_inputChat, 200, _inputFieldStyle, GUILayout.Width(inputW), GUILayout.Height(inputBarH));
+            Rect inputRect = GUILayoutUtility.GetLastRect();
 
-            if (string.IsNullOrEmpty(_inputChat) && !isFocused)
+            // 占位提示仅在 Repaint 阶段直接绘制，不生成多余控件 ID，杜绝控件 ID 偏移
+            if (Event.current.type == EventType.Repaint && string.IsNullOrEmpty(_inputChat) && !isFocused)
             {
                 string hint = "点击输入...";
                 if (_currentChannel == ChatChannel.Whisper)
                 {
                     hint = string.IsNullOrEmpty(_whisperTargetId) ? "点击输入 (请先在顶部选择目标)..." : $"对 [{_whisperTargetName}] 说...";
                 }
-                GUI.Label(new Rect(inputRect.x + 8, inputRect.y + 7, inputRect.width - 16, 20), hint, _placeholderStyle);
+                _placeholderStyle.Draw(new Rect(inputRect.x + 8, inputRect.y + 7, inputRect.width - 16, 20), hint, false, false, false, false);
             }
 
             GUILayout.Space(4);
@@ -1343,9 +1351,11 @@ namespace SmartSpace.UI
             if (GUILayout.Button("发 送", _sendBtnStyle, GUILayout.Width(68), GUILayout.Height(36))
                 && !string.IsNullOrEmpty(_inputChat.Trim()))
             {
-                SendMessageContent(_inputChat.Trim());
-                _inputChat = "";
-                GUI.FocusControl(null);
+                if (SendMessageContent(_inputChat.Trim()))
+                {
+                    _inputChat = "";
+                    GUI.FocusControl(null);
+                }
             }
 
             GUILayout.EndHorizontal();
@@ -1479,9 +1489,13 @@ namespace SmartSpace.UI
             }
         }
 
-        private void SendMessageContent(string content)
+        private bool SendMessageContent(string content)
         {
-            if (NetworkManager.Instance == null || !NetworkManager.Instance.IsConnected) return;
+            if (NetworkManager.Instance == null || !NetworkManager.Instance.IsConnected)
+            {
+                AddSystemMessage("<color=#FF5252>未连接到空间服务器，消息发送失败！</color>");
+                return false;
+            }
 
             if (_currentChannel == ChatChannel.Whisper)
             {
@@ -1489,14 +1503,16 @@ namespace SmartSpace.UI
                 {
                     AddSystemMessage("<color=#FF5252>请先选择私聊目标玩家！</color>");
                     _showPlayerSelectDropdown = true;
-                    return;
+                    return false;
                 }
 
                 NetworkManager.Instance.SendWhisper(_whisperTargetId, content);
+                return true;
             }
             else
             {
                 NetworkManager.Instance.SendChat(content);
+                return true;
             }
         }
 
