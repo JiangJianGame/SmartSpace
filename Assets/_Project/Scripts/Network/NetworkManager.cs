@@ -33,6 +33,42 @@ namespace SmartSpace.Network
         public sbyte avatarId;
         public string message;
         public double timestamp;
+        public string channel;
+        public string title;
+    }
+
+    [Serializable]
+    public class HornMessageBroadcast
+    {
+        public string senderId;
+        public string username;
+        public sbyte avatarId;
+        public string message;
+        public double timestamp;
+    }
+
+    [Serializable]
+    public class AchievementMessageBroadcast
+    {
+        public string senderId;
+        public string username;
+        public sbyte avatarId;
+        public string title;
+        public string desc;
+        public double timestamp;
+    }
+
+    [Serializable]
+    public class HornPayload
+    {
+        public string message;
+    }
+
+    [Serializable]
+    public class AchievementPayload
+    {
+        public string title;
+        public string desc;
     }
 
     [Serializable]
@@ -117,6 +153,8 @@ namespace SmartSpace.Network
         public event Action<string, string, string> OnChatMessageReceived; // senderId, username, message
         public event Action<string, string, int, string> OnChatMessageWithAvatarReceived; // senderId, username, avatarId, message
         public event Action<ChatMessageBroadcast[]> OnChatHistoryReceived; // historical messages from server
+        public event Action<HornMessageBroadcast> OnHornMessageReceived; // 大喇叭广播
+        public event Action<AchievementMessageBroadcast> OnAchievementMessageReceived; // 成就播报广播
         public event Action<WhisperMessageBroadcast> OnWhisperMessageReceived;
         public event Action<string, string, EmoteType> OnPlayerEmoteReceived; // senderId, username, emoteType
         public event Action<string, string> OnPlayerJoined; // sessionId, username
@@ -246,6 +284,20 @@ namespace SmartSpace.Network
                     {
                         OnChatHistoryReceived?.Invoke(historyList);
                     }
+                });
+
+                // Register horn / loudspeaker broadcast
+                _room.OnMessage<HornMessageBroadcast>("hornMessage", (hornMsg) =>
+                {
+                    Debug.Log($"[Horn] {hornMsg.username}: {hornMsg.message}");
+                    OnHornMessageReceived?.Invoke(hornMsg);
+                });
+
+                // Register achievement broadcast
+                _room.OnMessage<AchievementMessageBroadcast>("achievementMessage", (achMsg) =>
+                {
+                    Debug.Log($"[Achievement] {achMsg.username} unlocked: {achMsg.title}");
+                    OnAchievementMessageReceived?.Invoke(achMsg);
                 });
 
                 // Register whisper / private chat message
@@ -517,6 +569,18 @@ namespace SmartSpace.Network
                 targetId = targetId,
                 message = message
             });
+        }
+
+        public void SendHorn(string message)
+        {
+            if (!IsConnected || string.IsNullOrEmpty(message)) return;
+            _room.Send("horn", new HornPayload { message = message });
+        }
+
+        public void BroadcastAchievement(string title, string desc)
+        {
+            if (!IsConnected || string.IsNullOrEmpty(title)) return;
+            _room.Send("achievement", new AchievementPayload { title = title, desc = desc });
         }
 
         public void SendEmote(sbyte emoteId)

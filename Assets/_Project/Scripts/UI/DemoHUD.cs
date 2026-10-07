@@ -8,10 +8,12 @@ namespace SmartSpace.UI
 {
     public enum ChatChannel
     {
-        World = 0,    // 世界 (全服广场)
-        Nearby = 1,   // 附近 (区域同屏)
-        System = 2,   // 系统 (原队伍)
-        Whisper = 3   // 私聊 (原战队)
+        World = 0,        // 世界 (玩家发言)
+        Nearby = 1,       // 附近 (区域同屏)
+        System = 2,       // 系统 (系统文本)
+        Whisper = 3,      // 私聊 (私聊记录)
+        Horn = 4,         // 大喇叭 (全服喇叭)
+        Achievement = 5   // 成就播报 (荣誉广播)
     }
 
     [Serializable]
@@ -22,6 +24,7 @@ namespace SmartSpace.UI
         public string SenderName;
         public string TargetId;
         public string TargetName;
+        public string Title;       // 成就称号 / 喇叭主题
         public string Content;
         public string TimeStr;
         public bool IsSelf;
@@ -112,6 +115,14 @@ namespace SmartSpace.UI
         private GUIStyle _statusLabelStyle;
         private GUIStyle _placeholderStyle;
 
+        // Horn & Achievement Styles
+        private GUIStyle _hornBoxStyle;
+        private GUIStyle _hornTagStyle;
+        private GUIStyle _hornContentStyle;
+        private GUIStyle _achievementBoxStyle;
+        private GUIStyle _achievementTagStyle;
+        private GUIStyle _achievementContentStyle;
+
         // Profile & Modal Styles
         private GUIStyle _modalOverlayStyle;
         private GUIStyle _modalCardStyle;
@@ -136,6 +147,8 @@ namespace SmartSpace.UI
         private Texture2D _texMiniBarBg;
         private Texture2D _texAvatarBorder;
         private Texture2D _texSmileyIcon;
+        private Texture2D _texHornBg;
+        private Texture2D _texAchievementBg;
 
         // Modal & Profile Textures
         private Texture2D _texModalOverlay;
@@ -231,6 +244,8 @@ namespace SmartSpace.UI
             {
                 NetworkManager.Instance.OnConnectionStateChanged += HandleConnectionStateChanged;
                 NetworkManager.Instance.OnChatMessageWithAvatarReceived += HandleChatMessageWithAvatar;
+                NetworkManager.Instance.OnHornMessageReceived += HandleHornMessage;
+                NetworkManager.Instance.OnAchievementMessageReceived += HandleAchievementMessage;
                 NetworkManager.Instance.OnChatHistoryReceived += HandleChatHistoryFromServer;
                 NetworkManager.Instance.OnWhisperMessageReceived += HandleWhisperMessage;
                 NetworkManager.Instance.OnPlayerJoined += HandlePlayerJoined;
@@ -247,6 +262,8 @@ namespace SmartSpace.UI
             {
                 NetworkManager.Instance.OnConnectionStateChanged -= HandleConnectionStateChanged;
                 NetworkManager.Instance.OnChatMessageWithAvatarReceived -= HandleChatMessageWithAvatar;
+                NetworkManager.Instance.OnHornMessageReceived -= HandleHornMessage;
+                NetworkManager.Instance.OnAchievementMessageReceived -= HandleAchievementMessage;
                 NetworkManager.Instance.OnChatHistoryReceived -= HandleChatHistoryFromServer;
                 NetworkManager.Instance.OnWhisperMessageReceived -= HandleWhisperMessage;
                 NetworkManager.Instance.OnPlayerJoined -= HandlePlayerJoined;
@@ -340,6 +357,67 @@ namespace SmartSpace.UI
             });
         }
 
+        private void HandleHornMessage(HornMessageBroadcast hornMsg)
+        {
+            if (hornMsg == null || string.IsNullOrEmpty(hornMsg.message)) return;
+
+            string myId = NetworkManager.Instance != null ? NetworkManager.Instance.SessionId : "";
+            bool isMe = (hornMsg.senderId == myId);
+
+            int finalAvatar = isMe
+                ? (NetworkManager.Instance != null && NetworkManager.Instance.LocalProfile != null ? NetworkManager.Instance.LocalProfile.avatarId : hornMsg.avatarId)
+                : hornMsg.avatarId;
+
+            if (!isMe && NetworkManager.Instance != null && NetworkManager.Instance.OnlineProfiles.TryGetValue(hornMsg.senderId, out var prof))
+            {
+                finalAvatar = prof.avatarId;
+            }
+
+            AddBubbleMessage(new ChatBubbleItem
+            {
+                Channel = ChatChannel.Horn,
+                SenderId = hornMsg.senderId,
+                SenderName = hornMsg.username,
+                Content = hornMsg.message,
+                TimeStr = DateTime.Now.ToString("HH:mm"),
+                IsSelf = isMe,
+                Level = isMe ? 40 : 25,
+                AvatarIndex = finalAvatar,
+                Timestamp = (long)hornMsg.timestamp
+            });
+        }
+
+        private void HandleAchievementMessage(AchievementMessageBroadcast achMsg)
+        {
+            if (achMsg == null || string.IsNullOrEmpty(achMsg.title)) return;
+
+            string myId = NetworkManager.Instance != null ? NetworkManager.Instance.SessionId : "";
+            bool isMe = (achMsg.senderId == myId);
+
+            int finalAvatar = isMe
+                ? (NetworkManager.Instance != null && NetworkManager.Instance.LocalProfile != null ? NetworkManager.Instance.LocalProfile.avatarId : achMsg.avatarId)
+                : achMsg.avatarId;
+
+            if (!isMe && NetworkManager.Instance != null && NetworkManager.Instance.OnlineProfiles.TryGetValue(achMsg.senderId, out var prof))
+            {
+                finalAvatar = prof.avatarId;
+            }
+
+            AddBubbleMessage(new ChatBubbleItem
+            {
+                Channel = ChatChannel.Achievement,
+                SenderId = achMsg.senderId,
+                SenderName = achMsg.username,
+                Title = achMsg.title,
+                Content = string.IsNullOrEmpty(achMsg.desc) ? "在智慧空间广场达成了荣誉挑战！" : achMsg.desc,
+                TimeStr = DateTime.Now.ToString("HH:mm"),
+                IsSelf = isMe,
+                Level = isMe ? 40 : 25,
+                AvatarIndex = finalAvatar,
+                Timestamp = (long)achMsg.timestamp
+            });
+        }
+
         private void HandleChatHistoryFromServer(ChatMessageBroadcast[] serverHistory)
         {
             if (serverHistory == null || serverHistory.Length == 0) return;
@@ -359,11 +437,17 @@ namespace SmartSpace.UI
                     ? DateTimeOffset.FromUnixTimeMilliseconds((long)sMsg.timestamp).ToLocalTime().ToString("HH:mm")
                     : DateTime.Now.ToString("HH:mm");
 
+                ChatChannel ch = ChatChannel.World;
+                if (sMsg.channel == "horn") ch = ChatChannel.Horn;
+                else if (sMsg.channel == "achievement") ch = ChatChannel.Achievement;
+                else if (sMsg.channel == "system") ch = ChatChannel.System;
+
                 AddBubbleMessage(new ChatBubbleItem
                 {
-                    Channel = ChatChannel.World,
+                    Channel = ch,
                     SenderId = sMsg.senderId,
                     SenderName = sMsg.username,
+                    Title = sMsg.title,
                     Content = sMsg.message,
                     TimeStr = time,
                     IsSelf = isMe,
@@ -440,10 +524,7 @@ namespace SmartSpace.UI
 
         private void HandlePlayerProfileChanged(string sessionId, UserProfile profile)
         {
-            if (profile != null)
-            {
-                AddSystemMessage($"玩家 <color=#00E5FF><b>{profile.username}</b></color> 更新了个人资料。");
-            }
+            // 修改个人资料不需要在世界公屏播报，静默同步即可
         }
 
         private void AddSystemMessage(string content)
@@ -463,7 +544,8 @@ namespace SmartSpace.UI
 
         private void AddBubbleMessage(ChatBubbleItem item, bool saveToDisk = true)
         {
-            if (item == null || string.IsNullOrEmpty(item.Content)) return;
+            if (item == null) return;
+            if (string.IsNullOrEmpty(item.Content) && string.IsNullOrEmpty(item.Title)) return;
 
             // Deduplicate: check if an identical message exists in recent messages
             int checkStart = Mathf.Max(0, _messages.Count - 8);
@@ -472,6 +554,7 @@ namespace SmartSpace.UI
                 var existing = _messages[i];
                 if (existing.SenderId == item.SenderId &&
                     existing.Content == item.Content &&
+                    existing.Title == item.Title &&
                     existing.Channel == item.Channel &&
                     existing.TimeStr == item.TimeStr)
                 {
@@ -510,6 +593,10 @@ namespace SmartSpace.UI
             // 1. Sync from static in-memory list first (prevents loss during soft scene reloads)
             if (s_sharedMessages.Count > 0)
             {
+                s_sharedMessages.RemoveAll(item => 
+                    item.Channel == ChatChannel.System && 
+                    (item.Content.Contains("更新了个人资料") || item.Content.Contains("修改了个人资料"))
+                );
                 _messages.AddRange(s_sharedMessages);
                 _shouldScrollToBottom = true;
                 return;
@@ -526,6 +613,11 @@ namespace SmartSpace.UI
                         var wrapper = JsonUtility.FromJson<ChatHistoryWrapper>(json);
                         if (wrapper != null && wrapper.items != null && wrapper.items.Count > 0)
                         {
+                            wrapper.items.RemoveAll(item => 
+                                item.Channel == ChatChannel.System && 
+                                (item.Content.Contains("更新了个人资料") || item.Content.Contains("修改了个人资料"))
+                            );
+
                             _messages.AddRange(wrapper.items);
                             s_sharedMessages.Clear();
                             s_sharedMessages.AddRange(wrapper.items);
@@ -694,6 +786,8 @@ namespace SmartSpace.UI
             if (_texAvatarBorder != null) Destroy(_texAvatarBorder);
             if (_texAvatarSelf != null) Destroy(_texAvatarSelf);
             if (_texSmileyIcon != null) Destroy(_texSmileyIcon);
+            if (_texHornBg != null) Destroy(_texHornBg);
+            if (_texAchievementBg != null) Destroy(_texAchievementBg);
             if (_texModalOverlay != null) Destroy(_texModalOverlay);
             if (_texModalCardBg != null) Destroy(_texModalCardBg);
             if (_texInputDark != null) Destroy(_texInputDark);
@@ -735,6 +829,8 @@ namespace SmartSpace.UI
             _texMiniBarBg = MakeSolidTex(2, 2, new Color(0.05f, 0.09f, 0.16f, 0.90f));
             _texAvatarBorder = MakeBorderedTex(42, 42, new Color(0.10f, 0.16f, 0.26f, 1f), new Color(0.20f, 0.55f, 0.95f, 1f), 2);
             _texSmileyIcon = MakeSmileyTex(34);
+            _texHornBg = MakeBorderedTex(64, 64, new Color(0.25f, 0.18f, 0.05f, 0.95f), new Color(1.0f, 0.85f, 0.22f, 1.0f), 2);
+            _texAchievementBg = MakeBorderedTex(64, 64, new Color(0.20f, 0.08f, 0.30f, 0.95f), new Color(0.92f, 0.55f, 1.0f, 1.0f), 2);
 
             // Modal & Profile Textures
             _texModalOverlay = MakeSolidTex(2, 2, new Color(0.02f, 0.04f, 0.08f, 0.78f)); // Dark backdrop
@@ -861,6 +957,60 @@ namespace SmartSpace.UI
                 wordWrap = true,
                 alignment = TextAnchor.MiddleLeft,
                 normal = { textColor = new Color(0.90f, 0.95f, 1.0f) },
+                padding = new RectOffset(0, 0, 0, 0)
+            };
+
+            // Horn & Achievement Styles
+            _hornBoxStyle = new GUIStyle(GUI.skin.box)
+            {
+                normal = { background = _texHornBg },
+                padding = new RectOffset(10, 10, 6, 6),
+                margin = new RectOffset(0, 0, 3, 3)
+            };
+
+            _hornTagStyle = new GUIStyle(GUI.skin.label)
+            {
+                fontSize = 11,
+                fontStyle = FontStyle.Bold,
+                richText = true,
+                alignment = TextAnchor.MiddleLeft,
+                normal = { textColor = new Color(1.0f, 0.90f, 0.25f) },
+                padding = new RectOffset(0, 0, 0, 0)
+            };
+
+            _hornContentStyle = new GUIStyle(GUI.skin.label)
+            {
+                fontSize = 12,
+                fontStyle = FontStyle.Bold,
+                wordWrap = true,
+                richText = true,
+                normal = { textColor = Color.white },
+                padding = new RectOffset(0, 0, 0, 0)
+            };
+
+            _achievementBoxStyle = new GUIStyle(GUI.skin.box)
+            {
+                normal = { background = _texAchievementBg },
+                padding = new RectOffset(10, 10, 6, 6),
+                margin = new RectOffset(0, 0, 3, 3)
+            };
+
+            _achievementTagStyle = new GUIStyle(GUI.skin.label)
+            {
+                fontSize = 11,
+                fontStyle = FontStyle.Bold,
+                richText = true,
+                alignment = TextAnchor.MiddleLeft,
+                normal = { textColor = new Color(1.0f, 0.75f, 0.20f) },
+                padding = new RectOffset(0, 0, 0, 0)
+            };
+
+            _achievementContentStyle = new GUIStyle(GUI.skin.label)
+            {
+                fontSize = 12,
+                wordWrap = true,
+                richText = true,
+                normal = { textColor = new Color(0.95f, 0.90f, 1.0f) },
                 padding = new RectOffset(0, 0, 0, 0)
             };
 
@@ -1229,16 +1379,19 @@ namespace SmartSpace.UI
                 bool shouldShow = false;
                 if (_currentChannel == ChatChannel.World)
                 {
-                    // 【世界】作为全频道综合面板：世界、附近、系统与私聊均在此可见，绝不漏掉任何历史消息
-                    shouldShow = true;
+                    // 世界聊天只需要显示：玩家发言、大喇叭、成就播报和系统文本
+                    shouldShow = (msg.Channel == ChatChannel.World ||
+                                  msg.Channel == ChatChannel.Horn ||
+                                  msg.Channel == ChatChannel.Achievement ||
+                                  msg.Channel == ChatChannel.System);
                 }
                 else if (_currentChannel == ChatChannel.Nearby)
                 {
-                    shouldShow = (msg.Channel == ChatChannel.Nearby || msg.Channel == ChatChannel.World);
+                    shouldShow = (msg.Channel == ChatChannel.Nearby);
                 }
                 else if (_currentChannel == ChatChannel.System)
                 {
-                    shouldShow = (msg.Channel == ChatChannel.System);
+                    shouldShow = (msg.Channel == ChatChannel.System || msg.Channel == ChatChannel.Achievement);
                 }
                 else if (_currentChannel == ChatChannel.Whisper)
                 {
@@ -1247,7 +1400,15 @@ namespace SmartSpace.UI
 
                 if (shouldShow)
                 {
-                    if (msg.Channel == ChatChannel.System)
+                    if (msg.Channel == ChatChannel.Horn)
+                    {
+                        DrawHornBubble(msg, chatAreaWidth);
+                    }
+                    else if (msg.Channel == ChatChannel.Achievement)
+                    {
+                        DrawAchievementBubble(msg, chatAreaWidth);
+                    }
+                    else if (msg.Channel == ChatChannel.System)
                     {
                         DrawSystemNoticeBubble(msg, chatAreaWidth);
                     }
@@ -1345,7 +1506,15 @@ namespace SmartSpace.UI
 
             GUILayout.FlexibleSpace();
 
-            // 右上角操作按钮: 轮盘 / 访客 / 收起
+            // 右上角操作按钮: 喇叭 / 轮盘 / 访客 / 收起
+            if (GUILayout.Button("📢 喇叭", _sideActionBtnStyle, GUILayout.Width(58), GUILayout.Height(24)))
+            {
+                _inputChat = "/horn ";
+                GUI.FocusControl("AolaChatInputField");
+            }
+
+            GUILayout.Space(4);
+
             if (GUILayout.Button("🎡 轮盘", _sideActionBtnStyle, GUILayout.Width(58), GUILayout.Height(24)))
             {
                 if (EmoteWheelUI.Instance != null) EmoteWheelUI.Instance.OpenWheel();
@@ -1499,6 +1668,71 @@ namespace SmartSpace.UI
 
             // Content body: neatly word-wrapped with fixed width
             GUILayout.Label(msg.Content, _systemContentStyle, GUILayout.Width(cardWidth - 20f));
+
+            GUILayout.EndVertical();
+
+            GUILayout.Space(4);
+            GUILayout.EndHorizontal();
+        }
+
+        private void DrawHornBubble(ChatBubbleItem msg, float contentWidth)
+        {
+            GUILayout.Space(4);
+            float cardWidth = Mathf.Max(240f, contentWidth - 28f);
+
+            GUILayout.BeginHorizontal();
+            GUILayout.Space(4);
+
+            GUILayout.BeginVertical(_hornBoxStyle, GUILayout.Width(cardWidth));
+
+            // Top Row: Gold Horn Icon & Tag + Sender Name + Timestamp
+            GUILayout.BeginHorizontal();
+            GUILayout.Label("📢 <b><color=#FFE082>[全服大喇叭]</color></b>", _hornTagStyle, GUILayout.Height(18));
+            GUILayout.Space(4);
+            GUILayout.Label($"<color=#FFF59D><b>{msg.SenderName}</b></color>", _hornTagStyle, GUILayout.Height(18));
+            GUILayout.FlexibleSpace();
+            GUILayout.Label($"<color=#FFE082><size=10>{msg.TimeStr}</size></color>", _avatarLevelStyle, GUILayout.Height(18));
+            GUILayout.EndHorizontal();
+
+            GUILayout.Space(3);
+
+            // Content body: Bold Golden Content
+            GUILayout.Label(msg.Content, _hornContentStyle, GUILayout.Width(cardWidth - 20f));
+
+            GUILayout.EndVertical();
+
+            GUILayout.Space(4);
+            GUILayout.EndHorizontal();
+        }
+
+        private void DrawAchievementBubble(ChatBubbleItem msg, float contentWidth)
+        {
+            GUILayout.Space(4);
+            float cardWidth = Mathf.Max(240f, contentWidth - 28f);
+
+            GUILayout.BeginHorizontal();
+            GUILayout.Space(4);
+
+            GUILayout.BeginVertical(_achievementBoxStyle, GUILayout.Width(cardWidth));
+
+            // Top Row: Trophy Icon & Achievement Tag + Timestamp
+            GUILayout.BeginHorizontal();
+            GUILayout.Label("🏆 <b><color=#FFD54F>[全服成就播报]</color></b>", _achievementTagStyle, GUILayout.Height(18));
+            GUILayout.FlexibleSpace();
+            GUILayout.Label($"<color=#CE93D8><size=10>{msg.TimeStr}</size></color>", _avatarLevelStyle, GUILayout.Height(18));
+            GUILayout.EndHorizontal();
+
+            GUILayout.Space(2);
+
+            // Title line: Player name + Unlocked Achievement Title
+            string titleStr = !string.IsNullOrEmpty(msg.Title) ? msg.Title : "空间探索先锋";
+            GUILayout.Label($"恭喜玩家 <color=#FFD54F><b>{msg.SenderName}</b></color> 达成荣誉成就【<color=#00E5FF>{titleStr}</color>】！", _achievementContentStyle, GUILayout.Width(cardWidth - 20f));
+
+            if (!string.IsNullOrEmpty(msg.Content))
+            {
+                GUILayout.Space(1);
+                GUILayout.Label($"<color=#B39DDB><i>“{msg.Content}”</i></color>", _achievementContentStyle, GUILayout.Width(cardWidth - 20f));
+            }
 
             GUILayout.EndVertical();
 
@@ -1715,6 +1949,33 @@ namespace SmartSpace.UI
                 return false;
             }
 
+            // 1. 大喇叭指令 (/horn 内容, /喇叭 内容, /大喇叭 内容)
+            if (content.StartsWith("/horn ", StringComparison.OrdinalIgnoreCase) ||
+                content.StartsWith("/喇叭 ") ||
+                content.StartsWith("/大喇叭 "))
+            {
+                int firstSpace = content.IndexOf(' ');
+                string hornText = (firstSpace >= 0 && firstSpace < content.Length - 1) ? content.Substring(firstSpace + 1).Trim() : "";
+                if (!string.IsNullOrEmpty(hornText))
+                {
+                    NetworkManager.Instance.SendHorn(hornText);
+                    return true;
+                }
+            }
+
+            // 2. 成就播报测试指令 (/achieve 称号, /成就 称号)
+            if (content.StartsWith("/achieve ", StringComparison.OrdinalIgnoreCase) ||
+                content.StartsWith("/成就 "))
+            {
+                int firstSpace = content.IndexOf(' ');
+                string achTitle = (firstSpace >= 0 && firstSpace < content.Length - 1) ? content.Substring(firstSpace + 1).Trim() : "";
+                if (!string.IsNullOrEmpty(achTitle))
+                {
+                    NetworkManager.Instance.BroadcastAchievement(achTitle, "在智慧空间广场完成了瞩目的荣誉挑战！");
+                    return true;
+                }
+            }
+
             if (_currentChannel == ChatChannel.Whisper)
             {
                 if (string.IsNullOrEmpty(_whisperTargetId))
@@ -1751,6 +2012,8 @@ namespace SmartSpace.UI
                     ChatChannel.Nearby => "<color=#00E5FF>[附近]</color>",
                     ChatChannel.Whisper => "<color=#FF4081>[私聊]</color>",
                     ChatChannel.System => "<color=#76FF03>[系统]</color>",
+                    ChatChannel.Horn => "<color=#FFD54F>[喇叭]</color>",
+                    ChatChannel.Achievement => "<color=#CE93D8>[成就]</color>",
                     _ => "<color=#00E5FF>[世界]</color>"
                 };
                 string sender = !string.IsNullOrEmpty(latest.SenderName) ? $"<b>{latest.SenderName}</b>: " : "";

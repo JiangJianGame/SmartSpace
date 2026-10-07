@@ -19,6 +19,8 @@ export interface ChatHistoryItem {
   avatarId: number;
   message: string;
   timestamp: number;
+  channel?: string;
+  title?: string;
 }
 
 export class PlazaRoom extends Room<{ state: PlazaState }> {
@@ -58,7 +60,8 @@ export class PlazaRoom extends Room<{ state: PlazaState }> {
           username: player.username,
           avatarId: player.avatarId,
           message: cleanMsg,
-          timestamp: Date.now()
+          timestamp: Date.now(),
+          channel: "world"
         };
 
         this.chatHistory.push(historyItem);
@@ -68,6 +71,52 @@ export class PlazaRoom extends Room<{ state: PlazaState }> {
 
         // Also broadcast as explicit chat event for chat window log
         this.broadcast("chatMessage", historyItem);
+      }
+    });
+
+    // Register horn / loudspeaker handler
+    this.onMessage("horn", (client: Client, data: { message: string }) => {
+      const player = this.state.players.get(client.sessionId);
+      if (player && data && data.message) {
+        const cleanMsg = data.message.trim().substring(0, 100);
+        const hornItem: ChatHistoryItem = {
+          senderId: client.sessionId,
+          username: player.username,
+          avatarId: player.avatarId,
+          message: cleanMsg,
+          timestamp: Date.now(),
+          channel: "horn"
+        };
+
+        this.chatHistory.push(hornItem);
+        if (this.chatHistory.length > this.maxChatHistory) {
+          this.chatHistory.shift();
+        }
+
+        this.broadcast("hornMessage", hornItem);
+      }
+    });
+
+    // Register achievement broadcast handler
+    this.onMessage("achievement", (client: Client, data: { title: string; desc: string }) => {
+      const player = this.state.players.get(client.sessionId);
+      if (player && data && data.title) {
+        const achItem: ChatHistoryItem = {
+          senderId: client.sessionId,
+          username: player.username,
+          avatarId: player.avatarId,
+          message: data.desc || "",
+          title: data.title,
+          timestamp: Date.now(),
+          channel: "achievement"
+        };
+
+        this.chatHistory.push(achItem);
+        if (this.chatHistory.length > this.maxChatHistory) {
+          this.chatHistory.shift();
+        }
+
+        this.broadcast("achievementMessage", achItem);
       }
     });
 
