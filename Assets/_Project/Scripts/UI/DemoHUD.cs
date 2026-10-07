@@ -14,7 +14,8 @@ namespace SmartSpace.UI
         Whisper = 3,      // 私聊 (私聊记录)
         Horn = 4,         // 大喇叭 (全服喇叭)
         Achievement = 5,  // 成就播报 (荣誉广播)
-        Friend = 6        // 好友 (好友聊天)
+        Friend = 6,       // 好友 (好友聊天)
+        Team = 7          // 组队 (副本队伍聊天)
     }
 
     [Serializable]
@@ -90,6 +91,11 @@ namespace SmartSpace.UI
         private string _selectedFriendName = "休竹";
         private Vector2 _contactScrollPosition = Vector2.zero;
 
+        // Team & Dungeon State
+        [SerializeField] private bool _isInTeam = false;
+        private string _currentTeamName = "暗夜遗迹探索小队";
+        private int _teamMemberCount = 4;
+
         // Quick Emoji & Phrases Drawer State
         private bool _showQuickEmojiDrawer = false;
         private int _quickDrawerTab = 0; // 0: 表情, 1: 常用语
@@ -113,6 +119,7 @@ namespace SmartSpace.UI
         private GUIStyle _mainPanelStyle;
         private GUIStyle _tabActiveStyle;
         private GUIStyle _tabInactiveStyle;
+        private GUIStyle _tabDisabledStyle;
         private GUIStyle _marqueeStyle;
         private GUIStyle _senderNameOtherStyle;
         private GUIStyle _senderNameSelfStyle;
@@ -171,6 +178,7 @@ namespace SmartSpace.UI
         private Texture2D _texMainBg;
         private Texture2D _texTabActive;
         private Texture2D _texTabInactive;
+        private Texture2D _texTabDisabled;
         private Texture2D _texBubbleBlue;
         private Texture2D _texSendBtnYellow;
         private Texture2D _texInputWhite;
@@ -507,6 +515,12 @@ namespace SmartSpace.UI
             }
 
             SyncOnlinePlayersToContacts();
+
+            // 退出队伍后若停留在组队频道，自动切回世界频道
+            if (!_isInTeam && _currentChannel == ChatChannel.Team)
+            {
+                _currentChannel = ChatChannel.World;
+            }
 
             // Toggle Expand/Collapse with 'C' key when not focused in any input
             if (Input.GetKeyDown(KeyCode.C) && !IsTyping)
@@ -1004,6 +1018,7 @@ namespace SmartSpace.UI
             if (_texMainBg != null) Destroy(_texMainBg);
             if (_texTabActive != null) Destroy(_texTabActive);
             if (_texTabInactive != null) Destroy(_texTabInactive);
+            if (_texTabDisabled != null) Destroy(_texTabDisabled);
             if (_texBubbleBlue != null) Destroy(_texBubbleBlue);
             if (_texSendBtnYellow != null) Destroy(_texSendBtnYellow);
             if (_texInputWhite != null) Destroy(_texInputWhite);
@@ -1052,6 +1067,7 @@ namespace SmartSpace.UI
             _texMainBg = MakeSolidTex(2, 2, new Color(0.04f, 0.08f, 0.16f, 0.90f));
             _texTabActive = MakeSolidTex(2, 2, new Color(0.12f, 0.48f, 0.88f, 1.0f)); // Bright Blue
             _texTabInactive = MakeSolidTex(2, 2, new Color(0.08f, 0.14f, 0.24f, 0.85f)); // Dark Slate Blue
+            _texTabDisabled = MakeSolidTex(2, 2, new Color(0.06f, 0.09f, 0.14f, 0.85f)); // Dim Dark Slate
             _texBubbleBlue = MakeBorderedTex(32, 32, new Color(0.08f, 0.44f, 0.82f, 0.96f), new Color(0.12f, 0.54f, 0.95f, 1f), 1);
             _texSendBtnYellow = MakeSolidTex(2, 2, new Color(1.0f, 0.86f, 0.18f, 1.0f)); // Golden-Yellow
             _texInputWhite = MakeSolidTex(2, 2, new Color(0.93f, 0.95f, 0.97f, 1.0f));
@@ -1101,6 +1117,15 @@ namespace SmartSpace.UI
                 alignment = TextAnchor.MiddleCenter,
                 normal = { textColor = new Color(0.48f, 0.68f, 0.88f), background = _texTabInactive },
                 hover = { textColor = Color.white, background = _texTabActive }
+            };
+
+            _tabDisabledStyle = new GUIStyle(GUI.skin.button)
+            {
+                fontSize = 13,
+                alignment = TextAnchor.MiddleCenter,
+                normal = { textColor = new Color(0.32f, 0.38f, 0.45f, 0.60f), background = _texTabDisabled },
+                hover = { textColor = new Color(0.32f, 0.38f, 0.45f, 0.60f), background = _texTabDisabled },
+                active = { textColor = new Color(0.32f, 0.38f, 0.45f, 0.60f), background = _texTabDisabled }
             };
 
             // Subtitle / Hint Label Style
@@ -1609,10 +1634,11 @@ namespace SmartSpace.UI
             GUILayout.BeginVertical();
 
             DrawVerticalChannelTab("世界", ChatChannel.World);
+            DrawVerticalChannelTab("系统", ChatChannel.System);
+            DrawVerticalChannelTab("附近", ChatChannel.Nearby);
+            DrawVerticalChannelTab("组队", ChatChannel.Team, isEnabled: _isInTeam);
             DrawVerticalChannelTab("好友", ChatChannel.Friend);
             DrawVerticalChannelTab("私聊", ChatChannel.Whisper);
-            DrawVerticalChannelTab("附近", ChatChannel.Nearby);
-            DrawVerticalChannelTab("系统", ChatChannel.System);
 
             GUILayout.FlexibleSpace();
             GUILayout.EndVertical();
@@ -1695,6 +1721,10 @@ namespace SmartSpace.UI
                                   !string.IsNullOrEmpty(_whisperTargetId) &&
                                   (msg.SenderId == _whisperTargetId || msg.TargetId == _whisperTargetId));
                 }
+                else if (_currentChannel == ChatChannel.Team)
+                {
+                    shouldShow = (msg.Channel == ChatChannel.Team);
+                }
 
                 if (shouldShow)
                 {
@@ -1729,6 +1759,7 @@ namespace SmartSpace.UI
                         ? "<color=#78909C>请在左侧列表中选择私聊对象...</color>" 
                         : $"<color=#78909C>暂无与 [{_whisperTargetName}] 的私聊记录，发条消息打个招呼吧！</color>",
                     ChatChannel.System => "<color=#78909C>暂无系统公告记录。</color>",
+                    ChatChannel.Team => $"<color=#78909C>队伍 [{_currentTeamName}] 暂无发言，与队友商讨副本战术吧！</color>",
                     _ => "<color=#78909C>暂无发言记录，快在下方输入与大家打招呼吧！</color>"
                 };
                 GUILayout.Label(emptyHint, _marqueeStyle);
@@ -1847,11 +1878,20 @@ namespace SmartSpace.UI
             GUILayout.EndArea();
         }
 
-        private void DrawVerticalChannelTab(string label, ChatChannel channel)
+        private void DrawVerticalChannelTab(string label, ChatChannel channel, bool isEnabled = true)
         {
+            if (!isEnabled)
+            {
+                bool prevEnabled = GUI.enabled;
+                GUI.enabled = false;
+                GUILayout.Button(label, _tabDisabledStyle, GUILayout.Height(44));
+                GUI.enabled = prevEnabled;
+                return;
+            }
+
             bool isActive = (_currentChannel == channel);
             GUIStyle style = isActive ? _tabActiveStyle : _tabInactiveStyle;
-            if (GUILayout.Button(label, style, GUILayout.Height(46)))
+            if (GUILayout.Button(label, style, GUILayout.Height(44)))
             {
                 _currentChannel = channel;
                 _shouldScrollToBottom = true;
@@ -1873,6 +1913,10 @@ namespace SmartSpace.UI
                 string targetName = !string.IsNullOrEmpty(_whisperTargetName) ? _whisperTargetName : "选择目标";
                 GUILayout.Label($"<color=#FF80AB><b>正在与 {targetName} 私聊</b></color>", _senderNameOtherStyle, GUILayout.Height(24));
             }
+            else if (_currentChannel == ChatChannel.Team)
+            {
+                GUILayout.Label($"<color=#00E676><b>● 队伍【{_currentTeamName}】</b></color>", _senderNameOtherStyle, GUILayout.Height(24));
+            }
             else
             {
                 string channelTitle = _currentChannel switch
@@ -1887,10 +1931,36 @@ namespace SmartSpace.UI
 
             GUILayout.FlexibleSpace();
 
-            // 右上角操作按钮: 喇叭 / 轮盘 / 访客 / 收起
-            if (_currentChannel != ChatChannel.Friend && _currentChannel != ChatChannel.Whisper)
+            // 右上角操作按钮: 副本组队 / 喇叭 / 轮盘 / 访客 / 收起
+            if (_currentChannel == ChatChannel.Team)
             {
-                if (GUILayout.Button("📢 喇叭", _sideActionBtnStyle, GUILayout.Width(58), GUILayout.Height(24)))
+                if (GUILayout.Button("🚪 退出队伍", _sideActionBtnStyle, GUILayout.Width(76), GUILayout.Height(24)))
+                {
+                    LeaveDungeonTeam();
+                }
+                GUILayout.Space(4);
+            }
+            else if (_currentChannel != ChatChannel.Friend && _currentChannel != ChatChannel.Whisper)
+            {
+                if (!_isInTeam)
+                {
+                    if (GUILayout.Button("⚔️ 组队", _sideActionBtnStyle, GUILayout.Width(56), GUILayout.Height(24)))
+                    {
+                        JoinDungeonTeam("暗夜英雄副本", 4);
+                        _currentChannel = ChatChannel.Team;
+                    }
+                }
+                else
+                {
+                    if (GUILayout.Button("🚪 退队", _sideActionBtnStyle, GUILayout.Width(56), GUILayout.Height(24)))
+                    {
+                        LeaveDungeonTeam();
+                    }
+                }
+
+                GUILayout.Space(4);
+
+                if (GUILayout.Button("📢 喇叭", _sideActionBtnStyle, GUILayout.Width(56), GUILayout.Height(24)))
                 {
                     _inputChat = "/horn ";
                     GUI.FocusControl("AolaChatInputField");
@@ -1898,12 +1968,11 @@ namespace SmartSpace.UI
 
                 GUILayout.Space(4);
 
-                if (GUILayout.Button("🎡 轮盘", _sideActionBtnStyle, GUILayout.Width(58), GUILayout.Height(24)))
+                if (GUILayout.Button("🎡 轮盘", _sideActionBtnStyle, GUILayout.Width(56), GUILayout.Height(24)))
                 {
                     if (EmoteWheelUI.Instance != null) EmoteWheelUI.Instance.OpenWheel();
                 }
 
-                GUILayout.Space(4);
             }
 
             if (GUILayout.Button("🤖 访客", _sideActionBtnStyle, GUILayout.Width(54), GUILayout.Height(24)))
@@ -1968,6 +2037,8 @@ namespace SmartSpace.UI
                         ChatChannel.Whisper => "<color=#FF4081>[私聊]</color> ",
                         ChatChannel.Nearby => "<color=#00E5FF>[附近]</color> ",
                         ChatChannel.System => "<color=#76FF03>[系统]</color> ",
+                        ChatChannel.Team => "<color=#00E676>[组队]</color> ",
+                        ChatChannel.Friend => "<color=#00E5FF>[好友]</color> ",
                         _ => ""
                     };
                 }
@@ -1998,6 +2069,8 @@ namespace SmartSpace.UI
                         ChatChannel.Whisper => "<color=#FF4081>[私聊]</color> ",
                         ChatChannel.Nearby => "<color=#00E5FF>[附近]</color> ",
                         ChatChannel.System => "<color=#76FF03>[系统]</color> ",
+                        ChatChannel.Team => "<color=#00E676>[组队]</color> ",
+                        ChatChannel.Friend => "<color=#00E5FF>[好友]</color> ",
                         _ => ""
                     };
                 }
@@ -2167,6 +2240,10 @@ namespace SmartSpace.UI
                 else if (_currentChannel == ChatChannel.Whisper)
                 {
                     hint = string.IsNullOrEmpty(_whisperTargetId) ? "点击输入 (请先在左侧选择目标)..." : $"对 [{_whisperTargetName}] 说...";
+                }
+                else if (_currentChannel == ChatChannel.Team)
+                {
+                    hint = $"在队伍 [{_currentTeamName}] 中发言...";
                 }
                 _placeholderStyle.Draw(new Rect(inputRect.x + 8, inputRect.y + 7, inputRect.width - 16, 20), hint, false, false, false, false);
             }
@@ -2364,6 +2441,21 @@ namespace SmartSpace.UI
                 }
             }
 
+            // 3. 队伍快捷指令 (/team, /jointeam, /leaveteam)
+            if (content.Equals("/team", StringComparison.OrdinalIgnoreCase) ||
+                content.Equals("/jointeam", StringComparison.OrdinalIgnoreCase))
+            {
+                JoinDungeonTeam("暗夜之城·英雄副本 队伍", 4);
+                _currentChannel = ChatChannel.Team;
+                return true;
+            }
+            if (content.Equals("/leaveteam", StringComparison.OrdinalIgnoreCase) ||
+                content.Equals("/quitteam", StringComparison.OrdinalIgnoreCase))
+            {
+                LeaveDungeonTeam();
+                return true;
+            }
+
             if (_currentChannel == ChatChannel.Friend)
             {
                 if (string.IsNullOrEmpty(_selectedFriendId))
@@ -2416,6 +2508,38 @@ namespace SmartSpace.UI
                 NetworkManager.Instance.SendWhisper(_whisperTargetId, content);
                 return true;
             }
+            else if (_currentChannel == ChatChannel.Team)
+            {
+                if (!_isInTeam)
+                {
+                    AddSystemMessage("<color=#FF5252>当前不在副本队伍中，无法发送组队消息！</color>");
+                    return false;
+                }
+
+                string myId = NetworkManager.Instance != null ? NetworkManager.Instance.SessionId : "self";
+                string myName = NetworkManager.Instance != null && NetworkManager.Instance.LocalProfile != null 
+                    ? NetworkManager.Instance.LocalProfile.username 
+                    : "我";
+                int myAvatar = NetworkManager.Instance != null && NetworkManager.Instance.LocalProfile != null 
+                    ? NetworkManager.Instance.LocalProfile.avatarId 
+                    : 0;
+
+                AddBubbleMessage(new ChatBubbleItem
+                {
+                    Channel = ChatChannel.Team,
+                    SenderId = myId,
+                    SenderName = myName,
+                    Content = content,
+                    TimeStr = DateTime.Now.ToString("HH:mm"),
+                    IsSelf = true,
+                    AvatarIndex = myAvatar,
+                    Level = NetworkManager.Instance != null && NetworkManager.Instance.LocalProfile != null ? NetworkManager.Instance.LocalProfile.level : 1,
+                    Timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
+                });
+
+                StartCoroutine(SimulateTeamReplyRoutine(content));
+                return true;
+            }
             else
             {
                 NetworkManager.Instance.SendChat(content);
@@ -2440,6 +2564,7 @@ namespace SmartSpace.UI
                     ChatChannel.Friend => "<color=#00E5FF>[好友]</color>",
                     ChatChannel.Nearby => "<color=#00E5FF>[附近]</color>",
                     ChatChannel.Whisper => "<color=#FF4081>[私聊]</color>",
+                    ChatChannel.Team => "<color=#00E676>[组队]</color>",
                     ChatChannel.System => "<color=#76FF03>[系统]</color>",
                     ChatChannel.Horn => "<color=#FFD54F>[喇叭]</color>",
                     ChatChannel.Achievement => "<color=#CE93D8>[成就]</color>",
@@ -2893,9 +3018,9 @@ namespace SmartSpace.UI
 
             GUILayout.FlexibleSpace();
 
-            // Bottom Actions: Whisper or Add Friend or Close
+            // Bottom Actions: Whisper or Add Friend or Team Invite or Close
             GUILayout.BeginHorizontal();
-            if (GUILayout.Button("💬  发起私聊", _modalPrimaryBtnStyle, GUILayout.Height(38)))
+            if (GUILayout.Button("💬 私聊", _modalPrimaryBtnStyle, GUILayout.Height(36)))
             {
                 _whisperTargetId = _targetProfileSessionId;
                 _whisperTargetName = _targetProfile.username;
@@ -2905,9 +3030,9 @@ namespace SmartSpace.UI
                 _shouldScrollToBottom = true;
             }
 
-            GUILayout.Space(6);
+            GUILayout.Space(5);
 
-            if (GUILayout.Button("🤝  加为好友", _modalPrimaryBtnStyle, GUILayout.Height(38)))
+            if (GUILayout.Button("🤝 好友", _modalPrimaryBtnStyle, GUILayout.Height(36)))
             {
                 AddFriendFromProfile(_targetProfileSessionId, _targetProfile);
                 _selectedFriendId = _targetProfileSessionId;
@@ -2918,9 +3043,20 @@ namespace SmartSpace.UI
                 _shouldScrollToBottom = true;
             }
 
-            GUILayout.Space(6);
+            GUILayout.Space(5);
 
-            if (GUILayout.Button("关 闭", _modalSecondaryBtnStyle, GUILayout.Width(76), GUILayout.Height(38)))
+            if (GUILayout.Button("⚔ 组队", _modalPrimaryBtnStyle, GUILayout.Height(36)))
+            {
+                JoinDungeonTeam($"与 {_targetProfile.username} 的副本队", 2);
+                _currentChannel = ChatChannel.Team;
+                _showTargetProfileModal = false;
+                _isExpanded = true;
+                _shouldScrollToBottom = true;
+            }
+
+            GUILayout.Space(5);
+
+            if (GUILayout.Button("关闭", _modalSecondaryBtnStyle, GUILayout.Width(64), GUILayout.Height(36)))
             {
                 _showTargetProfileModal = false;
             }
@@ -2929,6 +3065,123 @@ namespace SmartSpace.UI
             GUILayout.EndVertical();
             GUILayout.EndArea();
         }
+
+        #region Team & Dungeon Methods
+
+        /// <summary>
+        /// 加入副本队伍，启用组队频道
+        /// </summary>
+        public void JoinDungeonTeam(string teamName = "暗夜之城·英雄副本 队伍", int memberCount = 4)
+        {
+            _isInTeam = true;
+            _currentTeamName = teamName;
+            _teamMemberCount = memberCount;
+
+            AddBubbleMessage(new ChatBubbleItem
+            {
+                Channel = ChatChannel.System,
+                SenderId = "system",
+                SenderName = "系统",
+                Content = $"你已加入副本队伍【{teamName}】（{memberCount}/4人），组队频道已启用！",
+                TimeStr = DateTime.Now.ToString("HH:mm"),
+                IsSelf = false,
+                Timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
+            });
+
+            AddBubbleMessage(new ChatBubbleItem
+            {
+                Channel = ChatChannel.Team,
+                SenderId = "teammate_lead",
+                SenderName = "炎魔队长",
+                AvatarIndex = 1,
+                Level = 45,
+                Content = "欢迎加入副本攻坚队！全员就绪打1，准备开怪！",
+                TimeStr = DateTime.Now.ToString("HH:mm"),
+                IsSelf = false,
+                Timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
+            });
+
+            _shouldScrollToBottom = true;
+        }
+
+        /// <summary>
+        /// 退出队伍，禁用组队频道
+        /// </summary>
+        public void LeaveDungeonTeam()
+        {
+            if (!_isInTeam) return;
+
+            string oldTeam = _currentTeamName;
+            _isInTeam = false;
+
+            AddBubbleMessage(new ChatBubbleItem
+            {
+                Channel = ChatChannel.System,
+                SenderId = "system",
+                SenderName = "系统",
+                Content = $"你已退出副本队伍【{oldTeam}】，组队频道已关闭。",
+                TimeStr = DateTime.Now.ToString("HH:mm"),
+                IsSelf = false,
+                Timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
+            });
+
+            // 退出队伍后若停留在组队频道，自动切回世界频道
+            if (_currentChannel == ChatChannel.Team)
+            {
+                _currentChannel = ChatChannel.World;
+            }
+
+            _shouldScrollToBottom = true;
+        }
+
+        private System.Collections.IEnumerator SimulateTeamReplyRoutine(string playerMsg)
+        {
+            yield return new WaitForSeconds(1.2f);
+            if (!_isInTeam) yield break;
+
+            string[] teammates = new string[] { "炎魔队长", "星辉圣骑", "灵溪治疗师" };
+            int[] avatars = new int[] { 1, 2, 3 };
+            int[] levels = new int[] { 45, 42, 40 };
+            int idx = UnityEngine.Random.Range(0, teammates.Length);
+
+            string reply;
+            if (playerMsg.Contains("1") || playerMsg.ToLower().Contains("ready"))
+            {
+                reply = "收到，全员就绪！准备进入 BOSS 房间！";
+            }
+            else if (playerMsg.Contains("开") || playerMsg.Contains("打"))
+            {
+                reply = "我来开怪拉仇恨，大家注意集火小怪！";
+            }
+            else
+            {
+                string[] replies = new string[]
+                {
+                    "收到！注意留好大招打爆发伤害！",
+                    "收到！我留着控制技能打断 BOSS 吟唱！",
+                    "收到，后排治疗就位，大家放心输出！",
+                    "打完这趟副本可以去交周常任务啦~"
+                };
+                reply = replies[UnityEngine.Random.Range(0, replies.Length)];
+            }
+
+            AddBubbleMessage(new ChatBubbleItem
+            {
+                Channel = ChatChannel.Team,
+                SenderId = "teammate_" + idx,
+                SenderName = teammates[idx],
+                Content = reply,
+                TimeStr = DateTime.Now.ToString("HH:mm"),
+                IsSelf = false,
+                Level = levels[idx],
+                AvatarIndex = avatars[idx],
+                Timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
+            });
+
+            _shouldScrollToBottom = true;
+        }
+
+        #endregion
 
         #endregion
     }
