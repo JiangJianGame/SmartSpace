@@ -13,8 +13,18 @@ interface ChatData {
   message: string;
 }
 
+export interface ChatHistoryItem {
+  senderId: string;
+  username: string;
+  avatarId: number;
+  message: string;
+  timestamp: number;
+}
+
 export class PlazaRoom extends Room<{ state: PlazaState }> {
   maxClients = 100;
+  private chatHistory: ChatHistoryItem[] = [];
+  private maxChatHistory: number = 50;
 
   onCreate(options: any) {
     console.log("[PlazaRoom] Room created with options:", options);
@@ -43,14 +53,28 @@ export class PlazaRoom extends Room<{ state: PlazaState }> {
         player.chatMsg = cleanMsg;
         player.chatTime = Date.now();
 
-        // Also broadcast as explicit chat event for chat window log
-        this.broadcast("chatMessage", {
+        const historyItem: ChatHistoryItem = {
           senderId: client.sessionId,
           username: player.username,
           avatarId: player.avatarId,
           message: cleanMsg,
           timestamp: Date.now()
-        });
+        };
+
+        this.chatHistory.push(historyItem);
+        if (this.chatHistory.length > this.maxChatHistory) {
+          this.chatHistory.shift();
+        }
+
+        // Also broadcast as explicit chat event for chat window log
+        this.broadcast("chatMessage", historyItem);
+      }
+    });
+
+    // Client requests full chat history
+    this.onMessage("getChatHistory", (client: Client) => {
+      if (this.chatHistory.length > 0) {
+        client.send("chatHistory", this.chatHistory);
       }
     });
 
@@ -168,6 +192,11 @@ export class PlazaRoom extends Room<{ state: PlazaState }> {
     player.animState = 0;
 
     this.state.players.set(client.sessionId, player);
+
+    // Send recent room chat history to newly joined player
+    if (this.chatHistory.length > 0) {
+      client.send("chatHistory", this.chatHistory);
+    }
   }
 
   onLeave(client: Client, code?: number) {

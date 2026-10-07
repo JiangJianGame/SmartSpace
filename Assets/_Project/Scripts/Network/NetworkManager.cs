@@ -116,6 +116,7 @@ namespace SmartSpace.Network
         public event Action<bool> OnConnectionStateChanged;
         public event Action<string, string, string> OnChatMessageReceived; // senderId, username, message
         public event Action<string, string, int, string> OnChatMessageWithAvatarReceived; // senderId, username, avatarId, message
+        public event Action<ChatMessageBroadcast[]> OnChatHistoryReceived; // historical messages from server
         public event Action<WhisperMessageBroadcast> OnWhisperMessageReceived;
         public event Action<string, string, EmoteType> OnPlayerEmoteReceived; // senderId, username, emoteType
         public event Action<string, string> OnPlayerJoined; // sessionId, username
@@ -235,6 +236,16 @@ namespace SmartSpace.Network
                     Debug.Log($"[Chat] {chatMsg.username}: {chatMsg.message}");
                     OnChatMessageReceived?.Invoke(chatMsg.senderId, chatMsg.username, chatMsg.message);
                     OnChatMessageWithAvatarReceived?.Invoke(chatMsg.senderId, chatMsg.username, chatMsg.avatarId, chatMsg.message);
+                });
+
+                // Register chat history broadcast
+                _room.OnMessage<ChatMessageBroadcast[]>("chatHistory", (historyList) =>
+                {
+                    Debug.Log($"[Chat] Received {historyList?.Length ?? 0} historical messages from server.");
+                    if (historyList != null && historyList.Length > 0)
+                    {
+                        OnChatHistoryReceived?.Invoke(historyList);
+                    }
                 });
 
                 // Register whisper / private chat message
@@ -514,6 +525,14 @@ namespace SmartSpace.Network
             _room.Send("emote", emoteId);
         }
 
+        public void RequestChatHistory()
+        {
+            if (IsConnected && _room != null)
+            {
+                _room.Send("getChatHistory");
+            }
+        }
+
         private readonly List<Room<PlazaState>> _botRooms = new List<Room<PlazaState>>();
 
         public async void SpawnNetworkBot(string botName = null)
@@ -584,7 +603,7 @@ namespace SmartSpace.Network
             Vector3 center = spawnPoint != null ? spawnPoint.position : Vector3.zero;
             center += new Vector3(UnityEngine.Random.Range(-4f, 4f), 0, UnityEngine.Random.Range(-4f, 4f));
 
-            float chatTimer = 0f;
+            float emoteTimer = 0f;
             var waitStep = new WaitForSeconds(0.05f); // 20Hz update rate
             EmoteType[] pool = new EmoteType[]
             {
@@ -612,12 +631,11 @@ namespace SmartSpace.Network
                     animState = 1 // Walk
                 });
 
-                chatTimer += 0.05f;
-                if (chatTimer >= 6.5f)
+                emoteTimer += 0.05f;
+                if (emoteTimer >= 15f)
                 {
-                    chatTimer = 0f;
+                    emoteTimer = 0f;
                     EmoteType picked = pool[UnityEngine.Random.Range(0, pool.Length)];
-                    botRoom.Send("chat", new ChatMessagePayload { message = EmoteHelper.GetChatText(picked) });
                     botRoom.Send("emote", (sbyte)picked);
                 }
 

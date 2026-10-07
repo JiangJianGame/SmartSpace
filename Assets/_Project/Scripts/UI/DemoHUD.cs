@@ -14,6 +14,7 @@ namespace SmartSpace.UI
         Whisper = 3   // 私聊 (原战队)
     }
 
+    [Serializable]
     public class ChatBubbleItem
     {
         public ChatChannel Channel;
@@ -26,6 +27,13 @@ namespace SmartSpace.UI
         public bool IsSelf;
         public int Level;
         public int AvatarIndex;
+        public long Timestamp;
+    }
+
+    [Serializable]
+    public class ChatHistoryWrapper
+    {
+        public List<ChatBubbleItem> items = new List<ChatBubbleItem>();
     }
 
     /// <summary>
@@ -38,9 +46,12 @@ namespace SmartSpace.UI
     /// </summary>
     public class DemoHUD : MonoBehaviour
     {
+        private const string PREF_CHAT_HISTORY = "AolaStar_ChatHistory_Cache";
+        private static readonly List<ChatBubbleItem> s_sharedMessages = new List<ChatBubbleItem>();
+
         [Header("Chat Settings")]
         [SerializeField] private bool defaultExpanded = true;
-        [SerializeField] private int maxHistoryCount = 80;
+        [SerializeField] private int maxHistoryCount = 200;
 
         public static bool IsTyping { get; private set; }
         private bool _isChatInputFocused = false;
@@ -50,6 +61,7 @@ namespace SmartSpace.UI
         private string _inputChat = "";
         private Vector2 _scrollPosition = Vector2.zero;
         private bool _shouldScrollToBottom = true;
+        private bool _isNetworkEventsSubscribed = false;
 
         // Whisper (私聊) State
         private string _whisperTargetId = "";
@@ -169,6 +181,17 @@ namespace SmartSpace.UI
             _isExpanded = defaultExpanded;
         }
 
+        private void OnEnable()
+        {
+            SubscribeNetworkEvents();
+            LoadHistory();
+
+            if (NetworkManager.Instance != null && NetworkManager.Instance.IsConnected)
+            {
+                NetworkManager.Instance.RequestChatHistory();
+            }
+        }
+
         private void Start()
         {
             // Initialize local profile
@@ -184,37 +207,63 @@ namespace SmartSpace.UI
                 _showInitialSetupModal = true;
             }
 
-            if (NetworkManager.Instance != null)
-            {
-                NetworkManager.Instance.OnConnectionStateChanged += HandleConnectionStateChanged;
-                NetworkManager.Instance.OnChatMessageWithAvatarReceived += HandleChatMessageWithAvatar;
-                NetworkManager.Instance.OnWhisperMessageReceived += HandleWhisperMessage;
-                NetworkManager.Instance.OnPlayerJoined += HandlePlayerJoined;
-                NetworkManager.Instance.OnPlayerLeft += HandlePlayerLeft;
-                NetworkManager.Instance.OnPlayerProfileChanged += HandlePlayerProfileChanged;
-            }
+            SubscribeNetworkEvents();
+            LoadHistory();
+        }
 
-            // Initial Welcome System Message
-            AddSystemMessage("成功连接至奥拉通讯网络。当前频道已就绪！");
-            AddSystemMessage("提示: 左上角可查看/修改个人信息 | 聊天界面右键头像可查看名片！");
+        private void OnDisable()
+        {
+            UnsubscribeNetworkEvents();
+            SaveHistory();
         }
 
         private void OnDestroy()
         {
+            UnsubscribeNetworkEvents();
+            SaveHistory();
+            CleanupTextures();
+        }
+
+        private void SubscribeNetworkEvents()
+        {
+            if (_isNetworkEventsSubscribed) return;
+            if (NetworkManager.Instance != null)
+            {
+                NetworkManager.Instance.OnConnectionStateChanged += HandleConnectionStateChanged;
+                NetworkManager.Instance.OnChatMessageWithAvatarReceived += HandleChatMessageWithAvatar;
+                NetworkManager.Instance.OnChatHistoryReceived += HandleChatHistoryFromServer;
+                NetworkManager.Instance.OnWhisperMessageReceived += HandleWhisperMessage;
+                NetworkManager.Instance.OnPlayerJoined += HandlePlayerJoined;
+                NetworkManager.Instance.OnPlayerLeft += HandlePlayerLeft;
+                NetworkManager.Instance.OnPlayerProfileChanged += HandlePlayerProfileChanged;
+                _isNetworkEventsSubscribed = true;
+            }
+        }
+
+        private void UnsubscribeNetworkEvents()
+        {
+            if (!_isNetworkEventsSubscribed) return;
             if (NetworkManager.Instance != null)
             {
                 NetworkManager.Instance.OnConnectionStateChanged -= HandleConnectionStateChanged;
                 NetworkManager.Instance.OnChatMessageWithAvatarReceived -= HandleChatMessageWithAvatar;
+                NetworkManager.Instance.OnChatHistoryReceived -= HandleChatHistoryFromServer;
                 NetworkManager.Instance.OnWhisperMessageReceived -= HandleWhisperMessage;
                 NetworkManager.Instance.OnPlayerJoined -= HandlePlayerJoined;
                 NetworkManager.Instance.OnPlayerLeft -= HandlePlayerLeft;
                 NetworkManager.Instance.OnPlayerProfileChanged -= HandlePlayerProfileChanged;
             }
-            CleanupTextures();
+            _isNetworkEventsSubscribed = false;
         }
 
         private void Update()
         {
+            // If NetworkManager was created after DemoHUD, subscribe to events once available
+            if (!_isNetworkEventsSubscribed && NetworkManager.Instance != null)
+            {
+                SubscribeNetworkEvents();
+            }
+
             // Toggle Expand/Collapse with 'C' key when not focused in any input
             if (Input.GetKeyDown(KeyCode.C) && !IsTyping)
             {
@@ -246,6 +295,10 @@ namespace SmartSpace.UI
             if (connected)
             {
                 AddSystemMessage("成功连接至空间服务器，随时可与同伴互动！");
+                if (NetworkManager.Instance != null)
+                {
+                    NetworkManager.Instance.RequestChatHistory();
+                }
             }
             else
             {
@@ -282,8 +335,45 @@ namespace SmartSpace.UI
                 TimeStr = DateTime.Now.ToString("HH:mm"),
                 IsSelf = isMe,
                 Level = isMe ? 40 : (Math.Abs(senderId.GetHashCode() % 30) + 15),
-                AvatarIndex = finalAvatar
+                AvatarIndex = finalAvatar,
+                Timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
             });
+        }
+
+        private void HandleChatHistoryFromServer(ChatMessageBroadcast[] serverHistory)
+        {
+            if (serverHistory == null || serverHistory.Length == 0) return;
+
+            string myId = NetworkManager.Instance != null ? NetworkManager.Instance.SessionId : "";
+
+            foreach (var sMsg in serverHistory)
+            {
+                if (sMsg == null || string.IsNullOrEmpty(sMsg.message)) continue;
+
+                bool isMe = (sMsg.senderId == myId);
+                int finalAvatar = isMe
+                    ? (NetworkManager.Instance != null && NetworkManager.Instance.LocalProfile != null ? NetworkManager.Instance.LocalProfile.avatarId : sMsg.avatarId)
+                    : sMsg.avatarId;
+
+                string time = (sMsg.timestamp > 0)
+                    ? DateTimeOffset.FromUnixTimeMilliseconds((long)sMsg.timestamp).ToLocalTime().ToString("HH:mm")
+                    : DateTime.Now.ToString("HH:mm");
+
+                AddBubbleMessage(new ChatBubbleItem
+                {
+                    Channel = ChatChannel.World,
+                    SenderId = sMsg.senderId,
+                    SenderName = sMsg.username,
+                    Content = sMsg.message,
+                    TimeStr = time,
+                    IsSelf = isMe,
+                    Level = isMe ? 40 : (Math.Abs(sMsg.senderId.GetHashCode() % 30) + 15),
+                    AvatarIndex = finalAvatar,
+                    Timestamp = (long)sMsg.timestamp
+                }, saveToDisk: false);
+            }
+
+            SaveHistory();
         }
 
         private void HandleWhisperMessage(WhisperMessageBroadcast msg)
@@ -324,7 +414,8 @@ namespace SmartSpace.UI
                 TimeStr = timeStr,
                 IsSelf = isMeSender,
                 Level = isMeSender ? 40 : (Math.Abs(msg.senderId.GetHashCode() % 30) + 15),
-                AvatarIndex = avatarIdx
+                AvatarIndex = avatarIdx,
+                Timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
             });
         }
 
@@ -365,18 +456,116 @@ namespace SmartSpace.UI
                 Content = content,
                 TimeStr = DateTime.Now.ToString("HH:mm"),
                 IsSelf = false,
-                Level = 99
+                Level = 99,
+                Timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
             });
         }
 
-        private void AddBubbleMessage(ChatBubbleItem item)
+        private void AddBubbleMessage(ChatBubbleItem item, bool saveToDisk = true)
         {
+            if (item == null || string.IsNullOrEmpty(item.Content)) return;
+
+            // Deduplicate: check if an identical message exists in recent messages
+            int checkStart = Mathf.Max(0, _messages.Count - 8);
+            for (int i = _messages.Count - 1; i >= checkStart; i--)
+            {
+                var existing = _messages[i];
+                if (existing.SenderId == item.SenderId &&
+                    existing.Content == item.Content &&
+                    existing.Channel == item.Channel &&
+                    existing.TimeStr == item.TimeStr)
+                {
+                    return; // Skip duplicate message
+                }
+            }
+
             _messages.Add(item);
+
+            if (!s_sharedMessages.Contains(item))
+            {
+                s_sharedMessages.Add(item);
+            }
+
             if (_messages.Count > maxHistoryCount)
             {
                 _messages.RemoveAt(0);
             }
+            if (s_sharedMessages.Count > maxHistoryCount)
+            {
+                s_sharedMessages.RemoveAt(0);
+            }
+
             _shouldScrollToBottom = true;
+
+            if (saveToDisk)
+            {
+                SaveHistory();
+            }
+        }
+
+        private void LoadHistory()
+        {
+            if (_messages.Count > 0) return;
+
+            // 1. Sync from static in-memory list first (prevents loss during soft scene reloads)
+            if (s_sharedMessages.Count > 0)
+            {
+                _messages.AddRange(s_sharedMessages);
+                _shouldScrollToBottom = true;
+                return;
+            }
+
+            // 2. Load from PlayerPrefs persistence (prevents loss after domain reload / restarts)
+            if (PlayerPrefs.HasKey(PREF_CHAT_HISTORY))
+            {
+                string json = PlayerPrefs.GetString(PREF_CHAT_HISTORY, "");
+                if (!string.IsNullOrEmpty(json))
+                {
+                    try
+                    {
+                        var wrapper = JsonUtility.FromJson<ChatHistoryWrapper>(json);
+                        if (wrapper != null && wrapper.items != null && wrapper.items.Count > 0)
+                        {
+                            _messages.AddRange(wrapper.items);
+                            s_sharedMessages.Clear();
+                            s_sharedMessages.AddRange(wrapper.items);
+                            _shouldScrollToBottom = true;
+                            return;
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        Debug.LogWarning($"[DemoHUD] Error restoring chat history: {ex.Message}");
+                    }
+                }
+            }
+
+            // 3. Fallback welcome message if brand new
+            AddSystemMessage("成功连接至奥拉通讯网络。当前频道已就绪！");
+            AddSystemMessage("提示: 左上角可查看/修改个人信息 | 聊天界面右键头像可查看名片！");
+        }
+
+        private void SaveHistory()
+        {
+            if (_messages.Count == 0) return;
+
+            try
+            {
+                var wrapper = new ChatHistoryWrapper();
+                int takeCount = Mathf.Min(_messages.Count, 150);
+                int startIndex = _messages.Count - takeCount;
+                for (int i = startIndex; i < _messages.Count; i++)
+                {
+                    wrapper.items.Add(_messages[i]);
+                }
+                string json = JsonUtility.ToJson(wrapper);
+                PlayerPrefs.SetString(PREF_CHAT_HISTORY, json);
+                PlayerPrefs.Save();
+            }
+            catch (Exception ex)
+            {
+                Debug.LogWarning($"[DemoHUD] Error saving chat history: {ex.Message}");
+            }
         }
 
         #endregion
@@ -1038,9 +1227,14 @@ namespace SmartSpace.UI
             foreach (var msg in _messages)
             {
                 bool shouldShow = false;
-                if (_currentChannel == ChatChannel.World || _currentChannel == ChatChannel.Nearby)
+                if (_currentChannel == ChatChannel.World)
                 {
-                    shouldShow = (msg.Channel == ChatChannel.World || msg.Channel == ChatChannel.Nearby);
+                    // 【世界】作为全频道综合面板：世界、附近、系统与私聊均在此可见，绝不漏掉任何历史消息
+                    shouldShow = true;
+                }
+                else if (_currentChannel == ChatChannel.Nearby)
+                {
+                    shouldShow = (msg.Channel == ChatChannel.Nearby || msg.Channel == ChatChannel.World);
                 }
                 else if (_currentChannel == ChatChannel.System)
                 {
@@ -1213,9 +1407,21 @@ namespace SmartSpace.UI
 
                 GUILayout.Space(6);
 
+                string chTag = "";
+                if (_currentChannel == ChatChannel.World && msg.Channel != ChatChannel.World)
+                {
+                    chTag = msg.Channel switch
+                    {
+                        ChatChannel.Whisper => "<color=#FF4081>[私聊]</color> ",
+                        ChatChannel.Nearby => "<color=#00E5FF>[附近]</color> ",
+                        ChatChannel.System => "<color=#76FF03>[系统]</color> ",
+                        _ => ""
+                    };
+                }
+
                 // Content Column (Name above Bubble)
                 GUILayout.BeginVertical();
-                GUILayout.Label(msg.SenderName, _senderNameOtherStyle);
+                GUILayout.Label(chTag + msg.SenderName, _senderNameOtherStyle);
                 GUILayout.Space(2);
                 GUILayout.Label(msg.Content, _bubbleOtherStyle, GUILayout.MaxWidth(maxBubbleW));
                 GUILayout.EndVertical();
@@ -1231,10 +1437,22 @@ namespace SmartSpace.UI
                 GUILayout.BeginHorizontal();
                 GUILayout.FlexibleSpace();
 
+                string selfChTag = "";
+                if (_currentChannel == ChatChannel.World && msg.Channel != ChatChannel.World)
+                {
+                    selfChTag = msg.Channel switch
+                    {
+                        ChatChannel.Whisper => "<color=#FF4081>[私聊]</color> ",
+                        ChatChannel.Nearby => "<color=#00E5FF>[附近]</color> ",
+                        ChatChannel.System => "<color=#76FF03>[系统]</color> ",
+                        _ => ""
+                    };
+                }
+
                 // Content Column (Name above Bubble, Right-aligned)
                 GUILayout.BeginVertical();
                 string targetPrefix = (!string.IsNullOrEmpty(msg.TargetName)) ? $"对 <color=#80D8FF>{msg.TargetName}</color> 说" : msg.SenderName;
-                GUILayout.Label(targetPrefix, _senderNameSelfStyle);
+                GUILayout.Label(selfChTag + targetPrefix, _senderNameSelfStyle);
                 GUILayout.Space(2);
                 GUILayout.Label(msg.Content, _bubbleSelfStyle, GUILayout.MaxWidth(maxBubbleW));
                 GUILayout.EndVertical();

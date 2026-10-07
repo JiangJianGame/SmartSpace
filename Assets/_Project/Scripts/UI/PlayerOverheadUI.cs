@@ -13,7 +13,7 @@ namespace SmartSpace.UI
         [SerializeField] private GameObject chatBubbleRoot;
 
         [Header("Settings")]
-        [SerializeField] private float chatDisplayDuration = 4.0f;
+        [SerializeField] private float chatDisplayDuration = 6.0f;
         [SerializeField] private float emojiDisplayDuration = 2.5f;
 
         private Coroutine _hideChatCoroutine;
