@@ -825,7 +825,7 @@ namespace SmartSpace.UI
             _texSendBtnYellow = MakeSolidTex(2, 2, new Color(1.0f, 0.86f, 0.18f, 1.0f)); // Golden-Yellow
             _texInputWhite = MakeSolidTex(2, 2, new Color(0.93f, 0.95f, 0.97f, 1.0f));
             _texEmojiDark = MakeSolidTex(2, 2, new Color(0.10f, 0.15f, 0.22f, 0.95f));
-            _texDrawerBg = MakeSolidTex(2, 2, new Color(0.07f, 0.12f, 0.20f, 0.98f));
+            _texDrawerBg = MakeBorderedTex(32, 32, new Color(0.06f, 0.10f, 0.20f, 0.98f), new Color(0.20f, 0.55f, 0.95f, 0.9f), 1);
             _texMiniBarBg = MakeSolidTex(2, 2, new Color(0.05f, 0.09f, 0.16f, 0.90f));
             _texAvatarBorder = MakeBorderedTex(42, 42, new Color(0.10f, 0.16f, 0.26f, 1f), new Color(0.20f, 0.55f, 0.95f, 1f), 2);
             _texSmileyIcon = MakeSmileyTex(34);
@@ -1328,41 +1328,30 @@ namespace SmartSpace.UI
             GUILayout.EndArea();
 
             // -------------------------------------------------------------
-            // B. RIGHT CHAT CONTENT AREAS (顶部栏 / 消息滚动区 / 底部输入栏)
-            // 采用绝对分层锚定，彻底杜绝流式布局累积误差，确保输入框在任何频道下位置绝对一致！
+            // B. RIGHT CHAT CONTENT AREAS (顶部栏 / 消息滚动区 / 底部输入栏 / 悬浮表情弹窗)
+            // 采用绝对分层锚定：底栏与滚动区位置绝对恒定，表情弹窗作为悬浮 Overlay 浮动在底栏上方，
+            // 彻底杜绝流式布局累积误差，确保输入框在任何状态下绝不移动、绝不错位！
             // -------------------------------------------------------------
             float topHeaderH = 32f;
-            float drawerH = _showQuickEmojiDrawer ? 96f : 0f;
-            float inputBarH = 54f;
-            float bottomReservedH = inputBarH + drawerH + 6f;
-            float scrollH = panelHeight - topHeaderH - bottomReservedH;
-            if (scrollH < 100f) scrollH = 100f;
+            float inputBarH = 50f;
+            float inputBarY = panelHeight - inputBarH - 6f; // 固定锚定在面板底部，位置永不改变
 
             // B1. Top Header Bar (高度严格固定 32px，私聊目标与快捷操作同层并列)
             GUILayout.BeginArea(new Rect(tabColWidth, 0, chatAreaWidth, topHeaderH));
             DrawTopHeaderBar();
             GUILayout.EndArea();
 
-            // B2. Bottom Input Area (先绘制底部输入栏，确保其 Control ID 永远固定，绝不受消息数量增减影响导致输入框焦点丢失或文本被清空！)
-            float bottomAreaY = panelHeight - bottomReservedH;
-            GUILayout.BeginArea(new Rect(tabColWidth, bottomAreaY, chatAreaWidth, bottomReservedH));
-            GUILayout.BeginVertical();
-
-            // Quick Emoji & Phrases Drawer (if opened)
-            if (_showQuickEmojiDrawer)
-            {
-                DrawQuickEmojiDrawer();
-                GUILayout.Space(2);
-            }
-
-            // Bottom Input Bar
+            // B2. Bottom Input Area (先绘制底部输入栏，确保其 Control ID 永远固定，位置绝对恒定)
+            GUILayout.BeginArea(new Rect(tabColWidth, inputBarY, chatAreaWidth, inputBarH));
             DrawBottomInputBar(chatAreaWidth);
-
-            GUILayout.EndVertical();
             GUILayout.EndArea();
 
-            // B3. Scrollable Bubble Messages Area (高度严格限定在顶部栏与底部栏之间)
-            GUILayout.BeginArea(new Rect(tabColWidth, topHeaderH, chatAreaWidth, scrollH));
+            // B3. Scrollable Bubble Messages Area (高度稳定限定在顶部栏与底部输入栏之间)
+            float scrollY = topHeaderH + 2f;
+            float scrollH = inputBarY - scrollY - 4f;
+            if (scrollH < 100f) scrollH = 100f;
+
+            GUILayout.BeginArea(new Rect(tabColWidth, scrollY, chatAreaWidth, scrollH));
             _scrollPosition = GUILayout.BeginScrollView(
                 _scrollPosition,
                 false,
@@ -1439,6 +1428,31 @@ namespace SmartSpace.UI
 
             GUILayout.EndScrollView();
             GUILayout.EndArea();
+
+            // B4. Quick Emoji & Phrases Drawer (悬浮弹窗 Overlay：浮动于输入栏正上方，不挤压底栏)
+            if (_showQuickEmojiDrawer)
+            {
+                float drawerW = chatAreaWidth - 8f;
+                float drawerH = 125f;
+                float drawerX = tabColWidth + 4f;
+                float drawerY = inputBarY - drawerH - 2f;
+                Rect drawerRect = new Rect(drawerX, drawerY, drawerW, drawerH);
+
+                GUILayout.BeginArea(drawerRect, _drawerBoxStyle);
+                DrawQuickEmojiDrawer();
+                GUILayout.EndArea();
+
+                // 点击弹窗外部（且非底部输入栏区域）时平滑收起，按 Esc 也收起
+                Rect inputBarRect = new Rect(tabColWidth, inputBarY, chatAreaWidth, inputBarH);
+                Event currentEvt = Event.current;
+                if ((currentEvt.type == EventType.MouseDown && 
+                     !drawerRect.Contains(currentEvt.mousePosition) && 
+                     !inputBarRect.Contains(currentEvt.mousePosition)) ||
+                    (currentEvt.type == EventType.KeyDown && currentEvt.keyCode == KeyCode.Escape))
+                {
+                    _showQuickEmojiDrawer = false;
+                }
+            }
 
             GUILayout.EndArea(); // Close panel main area
 
@@ -1819,15 +1833,15 @@ namespace SmartSpace.UI
 
         private void DrawQuickEmojiDrawer()
         {
-            GUILayout.BeginVertical(_drawerBoxStyle, GUILayout.Height(96));
+            GUILayout.BeginVertical();
 
             // Drawer Header with Sub-tabs
-            GUILayout.BeginHorizontal(GUILayout.Height(20));
+            GUILayout.BeginHorizontal(GUILayout.Height(22));
             GUIStyle tab0Style = (_quickDrawerTab == 0) ? _tabActiveStyle : _tabInactiveStyle;
             GUIStyle tab1Style = (_quickDrawerTab == 1) ? _tabActiveStyle : _tabInactiveStyle;
 
-            if (GUILayout.Button("😀 趣味表情", tab0Style, GUILayout.Width(85), GUILayout.Height(20))) _quickDrawerTab = 0;
-            if (GUILayout.Button("💬 常用短语", tab1Style, GUILayout.Width(85), GUILayout.Height(20))) _quickDrawerTab = 1;
+            if (GUILayout.Button("😀 趣味表情", tab0Style, GUILayout.Width(88), GUILayout.Height(20))) _quickDrawerTab = 0;
+            if (GUILayout.Button("💬 常用短语", tab1Style, GUILayout.Width(88), GUILayout.Height(20))) _quickDrawerTab = 1;
 
             GUILayout.FlexibleSpace();
             if (GUILayout.Button("✕", _sideActionBtnStyle, GUILayout.Width(22), GUILayout.Height(18)))
@@ -1836,7 +1850,7 @@ namespace SmartSpace.UI
             }
             GUILayout.EndHorizontal();
 
-            GUILayout.Space(2);
+            GUILayout.Space(3);
 
             if (_quickDrawerTab == 0)
             {
@@ -1850,7 +1864,7 @@ namespace SmartSpace.UI
                         if (idx < _quickEmojis.Length)
                         {
                             var item = _quickEmojis[idx];
-                            if (GUILayout.Button(item.label, _drawerItemStyle, GUILayout.Height(21)))
+                            if (GUILayout.Button(item.label, _drawerItemStyle, GUILayout.Height(22)))
                             {
                                 SendMessageContent(item.text);
                                 _showQuickEmojiDrawer = false;
@@ -1866,14 +1880,14 @@ namespace SmartSpace.UI
                 for (int i = 0; i < _quickPhrases.Length; i += 2)
                 {
                     GUILayout.BeginHorizontal();
-                    if (GUILayout.Button(_quickPhrases[i], _drawerItemStyle, GUILayout.Height(21)))
+                    if (GUILayout.Button(_quickPhrases[i], _drawerItemStyle, GUILayout.Height(22)))
                     {
                         SendMessageContent(_quickPhrases[i]);
                         _showQuickEmojiDrawer = false;
                     }
                     if (i + 1 < _quickPhrases.Length)
                     {
-                        if (GUILayout.Button(_quickPhrases[i + 1], _drawerItemStyle, GUILayout.Height(21)))
+                        if (GUILayout.Button(_quickPhrases[i + 1], _drawerItemStyle, GUILayout.Height(22)))
                         {
                             SendMessageContent(_quickPhrases[i + 1]);
                             _showQuickEmojiDrawer = false;
