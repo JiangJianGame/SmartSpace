@@ -538,6 +538,9 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: f6930206dbb018245b74b6acf4b894eb, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
+  defaultExpanded: 1
+  maxHistoryCount: 200
+  _isInTeam: 0
 --- !u!114 &986390201
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -583,9 +586,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 33d6b9bfa26cf7a41bb2095ddefd1589, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  wheelKey: 116
-  wheelRadius: 140
-  itemSize: 75
+  toggleKey: 116
 --- !u!1 &1214231002
 GameObject:
   m_ObjectHideFlags: 0

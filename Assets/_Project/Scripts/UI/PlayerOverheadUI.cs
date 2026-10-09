@@ -38,6 +38,13 @@ namespace SmartSpace.UI
             EnsureEmojiRoot();
         }
 
+        public void SetVisible(bool visible)
+        {
+            if (nameText != null) nameText.gameObject.SetActive(visible);
+            if (chatBubbleRoot != null && !visible) chatBubbleRoot.SetActive(false);
+            if (_emojiRoot != null && !visible) _emojiRoot.SetActive(false);
+        }
+
         private void EnsureEmojiRoot()
         {
             if (_emojiRoot != null) return;
@@ -52,17 +59,55 @@ namespace SmartSpace.UI
             {
                 _emojiRoot = new GameObject("EmojiBadge");
                 _emojiRoot.transform.SetParent(transform, false);
-                _emojiRoot.transform.localPosition = new Vector3(0, 0.55f, 0);
+                _emojiRoot.transform.localPosition = new Vector3(0, 0.75f, 0);
 
                 var tmp = _emojiRoot.AddComponent<TextMeshPro>();
-                tmp.fontSize = 2.8f;
+                if (nameText != null)
+                {
+                    tmp.font = nameText.font;
+                    tmp.fontSharedMaterial = nameText.fontSharedMaterial;
+                }
+                tmp.fontSize = 4.6f;
                 tmp.alignment = TextAlignmentOptions.Center;
                 tmp.text = "[ HELLO ]";
-                tmp.rectTransform.sizeDelta = new Vector2(4f, 1f);
+                tmp.rectTransform.sizeDelta = new Vector2(8.0f, 3.0f);
                 _emojiText = tmp;
             }
 
             _emojiRoot.SetActive(false);
+        }
+
+        public void Show2DEmote(string emoteName, string emoteSymbol)
+        {
+            EnsureEmojiRoot();
+            if (_emojiRoot == null || _emojiText == null) return;
+
+            if (nameText != null)
+            {
+                _emojiText.font = nameText.font;
+                _emojiText.fontSharedMaterial = nameText.fontSharedMaterial;
+            }
+            _emojiText.fontSize = 4.0f;
+            _emojiText.rectTransform.sizeDelta = new Vector2(8.0f, 3.0f);
+
+            string kaomoji = emoteName switch
+            {
+                "伊乐·微笑" => "(*^▽^*)",
+                "伊乐·大哭" => "( ╥﹏╥ )",
+                "伊乐·傲娇" => "( ￣^￣ )",
+                "伊乐·害羞" => "(*/ω＼*)",
+                "伊乐·委屈" => "(っ˘̩╭╮˘̩)っ",
+                "伊乐·比心" => "(づ￣ ³￣)づ♥",
+                _ => emoteSymbol
+            };
+
+            _emojiText.text = $"<size=125%><color=#FFE082><b>{kaomoji}</b></color></size>\n<size=70%><color=#00E5FF><b>【{emoteName}】</b></color></size>";
+
+            if (_emojiAnimCoroutine != null)
+            {
+                StopCoroutine(_emojiAnimCoroutine);
+            }
+            _emojiAnimCoroutine = StartCoroutine(AnimateEmojiBadge());
         }
 
         private void LateUpdate()
@@ -79,12 +124,46 @@ namespace SmartSpace.UI
             }
         }
 
+        private string _cachedUsername = "";
+        private string _cachedTitle = "";
+        private bool _isLocalPlayer = false;
+
+        public void SetUsernameAndTitle(string username, string title, bool isLocalPlayer)
+        {
+            _cachedUsername = username;
+            _cachedTitle = title;
+            _isLocalPlayer = isLocalPlayer;
+            UpdateNameText();
+        }
+
         public void SetUsername(string username, bool isLocalPlayer)
         {
-            if (nameText != null)
-            {
-                nameText.text = isLocalPlayer ? $"<color=#00E5FF>[YOU] {username}</color>" : $"<color=#FFD54F>{username}</color>";
-            }
+            _cachedUsername = username;
+            _isLocalPlayer = isLocalPlayer;
+            UpdateNameText();
+        }
+
+        public void SetTitle(string title)
+        {
+            _cachedTitle = title;
+            UpdateNameText();
+        }
+
+        private static string FormatTitle(string title)
+        {
+            if (string.IsNullOrEmpty(title)) return "";
+            title = title.Trim();
+            if (title.StartsWith("【") && title.EndsWith("】")) return title;
+            return $"【{title}】";
+        }
+
+        private void UpdateNameText()
+        {
+            if (nameText == null) return;
+            string formattedTitle = FormatTitle(_cachedTitle);
+            string titlePrefix = !string.IsNullOrEmpty(formattedTitle) ? $"<size=75%><color=#FFD54F><b>{formattedTitle}</b></color></size>\n" : "";
+            string namePart = _isLocalPlayer ? $"<color=#00E5FF>[YOU] {_cachedUsername}</color>" : $"<color=#FFD54F>{_cachedUsername}</color>";
+            nameText.text = titlePrefix + namePart;
         }
 
         public void ShowChat(string message)
@@ -126,19 +205,18 @@ namespace SmartSpace.UI
         private IEnumerator AnimateEmojiBadge()
         {
             _emojiRoot.SetActive(true);
-            Vector3 basePos = new Vector3(0, 0.55f, 0);
+            Vector3 basePos = new Vector3(0, 0.75f, 0);
             _emojiRoot.transform.localPosition = basePos;
-            _emojiRoot.transform.localScale = Vector3.zero;
+            _emojiRoot.transform.localScale = Vector3.one * 0.7f;
 
-            // 1. Elastic pop in (0 to 1.3 to 1.0)
+            // 1. Elastic pop in (0.7 to 1.25 to 1.0)
             float popDuration = 0.25f;
             float elapsed = 0f;
             while (elapsed < popDuration)
             {
                 elapsed += Time.deltaTime;
                 float t = elapsed / popDuration;
-                // Overshoot bounce
-                float s = Mathf.Sin(t * Mathf.PI * 0.75f) * 1.35f;
+                float s = Mathf.Lerp(0.7f, 1.25f, Mathf.Sin(t * Mathf.PI * 0.5f));
                 _emojiRoot.transform.localScale = Vector3.one * s;
                 yield return null;
             }
@@ -151,7 +229,7 @@ namespace SmartSpace.UI
             {
                 elapsed += Time.deltaTime;
                 float wobble = Mathf.Sin(elapsed * 10f) * 0.08f;
-                _emojiRoot.transform.localPosition = basePos + new Vector3(wobble, (elapsed / holdTime) * 0.4f, 0);
+                _emojiRoot.transform.localPosition = basePos + new Vector3(wobble, (elapsed / holdTime) * 0.08f, 0);
                 yield return null;
             }
 

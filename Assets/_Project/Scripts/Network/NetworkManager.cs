@@ -148,6 +148,8 @@ namespace SmartSpace.Network
         public bool IsConnected => _room != null;
         public string SessionId => _room != null ? _room.SessionId : "";
         public int PlayerCount => _spawnedPlayers.Count;
+        public IReadOnlyDictionary<string, GameObject> SpawnedPlayers => _spawnedPlayers;
+        public GameObject LocalPlayerObject => (_room != null && _spawnedPlayers.TryGetValue(_room.SessionId, out GameObject obj)) ? obj : null;
 
         public event Action<bool> OnConnectionStateChanged;
         public event Action<string, string, string> OnChatMessageReceived; // senderId, username, message

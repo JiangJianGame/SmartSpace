@@ -11,7 +11,28 @@ namespace SmartSpace.Network
         public string gender = "secret"; // "male" | "female" | "secret"
         public int age = 0; // 0 表示保密/未填, 1~120
         public string bio = "探索智慧空间，结交好友！";
-        public int level = 1;
+        public int level = 100;
+        public string uid = "9474911";
+        public string region = "中国湖北";
+        public string guild = "无";
+        public string title = "天赋异禀";
+        public string birthday = "2002-05-20";
+        public string status = "休闲中 ☕";
+        public int flowers = 4080;
+        public int achievePoints = 3440;
+        public int residenceDays = 365;
+        public int friendsCount = 8;
+        public int costumeId = 0;
+
+        public static readonly string[] StatusPresets = new string[]
+        {
+            "休闲中 ☕",
+            "放松中 🍃",
+            "漫游中 🚀",
+            "发呆中 ☁️",
+            "探险中 🗺️",
+            "忙碌中 ⚡"
+        };
 
         private const string PREF_KEY_HAS_PROFILE = "SmartSpace_HasProfile";
         private const string PREF_KEY_USERNAME = "SmartSpace_Profile_Username";
@@ -20,6 +41,14 @@ namespace SmartSpace.Network
         private const string PREF_KEY_AGE = "SmartSpace_Profile_Age";
         private const string PREF_KEY_BIO = "SmartSpace_Profile_Bio";
         private const string PREF_KEY_LEVEL = "SmartSpace_Profile_Level";
+        private const string PREF_KEY_UID = "SmartSpace_Profile_UID";
+        private const string PREF_KEY_REGION = "SmartSpace_Profile_Region";
+        private const string PREF_KEY_GUILD = "SmartSpace_Profile_Guild";
+        private const string PREF_KEY_TITLE = "SmartSpace_Profile_Title";
+        private const string PREF_KEY_FLOWERS = "SmartSpace_Profile_Flowers";
+        private const string PREF_KEY_BIRTHDAY = "SmartSpace_Profile_Birthday";
+        private const string PREF_KEY_STATUS = "SmartSpace_Profile_Status";
+        private const string PREF_KEY_COSTUME = "SmartSpace_Profile_Costume";
 
         public static readonly string[] AvatarNames = new string[]
         {
@@ -65,8 +94,20 @@ namespace SmartSpace.Network
                 p.avatarId = Mathf.Clamp(PlayerPrefs.GetInt(PREF_KEY_AVATAR, 0), 0, AvatarNames.Length - 1);
                 p.gender = PlayerPrefs.GetString(PREF_KEY_GENDER, "secret");
                 p.age = PlayerPrefs.GetInt(PREF_KEY_AGE, 0);
-                p.bio = PlayerPrefs.GetString(PREF_KEY_BIO, "探索智慧空间，结交好友！");
-                p.level = PlayerPrefs.GetInt(PREF_KEY_LEVEL, 1);
+                p.bio = PlayerPrefs.GetString(PREF_KEY_BIO, "这家伙太懒,什么都没留下...");
+                p.level = PlayerPrefs.GetInt(PREF_KEY_LEVEL, 100);
+                p.uid = PlayerPrefs.GetString(PREF_KEY_UID, "9474911");
+                p.region = PlayerPrefs.GetString(PREF_KEY_REGION, "中国湖北");
+                p.guild = PlayerPrefs.GetString(PREF_KEY_GUILD, "无");
+                p.title = PlayerPrefs.GetString(PREF_KEY_TITLE, "天赋异禀");
+                p.flowers = PlayerPrefs.GetInt(PREF_KEY_FLOWERS, 4080);
+                p.birthday = PlayerPrefs.GetString(PREF_KEY_BIRTHDAY, "2002-05-20");
+                if (!string.IsNullOrEmpty(p.birthday) && p.birthday != "保密" && p.birthday.Length <= 5)
+                {
+                    p.birthday = "2002-" + p.birthday;
+                }
+                p.status = PlayerPrefs.GetString(PREF_KEY_STATUS, "休闲中 ☕");
+                p.costumeId = PlayerPrefs.GetInt(PREF_KEY_COSTUME, 0);
             }
             else
             {
@@ -74,8 +115,16 @@ namespace SmartSpace.Network
                 p.avatarId = UnityEngine.Random.Range(0, AvatarNames.Length);
                 p.gender = "secret";
                 p.age = 0;
-                p.bio = "探索智慧空间，结交好友！";
-                p.level = 1;
+                p.bio = "这家伙太懒,什么都没留下...";
+                p.level = 100;
+                p.uid = UnityEngine.Random.Range(1000000, 9999999).ToString();
+                p.region = "中国湖北";
+                p.guild = "无";
+                p.title = "天赋异禀";
+                p.birthday = "2002-05-20";
+                p.status = "休闲中 ☕";
+                p.flowers = 4080;
+                p.costumeId = 0;
             }
             return p;
         }
@@ -89,6 +138,14 @@ namespace SmartSpace.Network
             PlayerPrefs.SetInt(PREF_KEY_AGE, age);
             PlayerPrefs.SetString(PREF_KEY_BIO, bio);
             PlayerPrefs.SetInt(PREF_KEY_LEVEL, level);
+            PlayerPrefs.SetString(PREF_KEY_UID, uid);
+            PlayerPrefs.SetString(PREF_KEY_REGION, region);
+            PlayerPrefs.SetString(PREF_KEY_GUILD, guild);
+            PlayerPrefs.SetString(PREF_KEY_TITLE, title);
+            PlayerPrefs.SetInt(PREF_KEY_FLOWERS, flowers);
+            PlayerPrefs.SetString(PREF_KEY_BIRTHDAY, birthday);
+            PlayerPrefs.SetString(PREF_KEY_STATUS, status);
+            PlayerPrefs.SetInt(PREF_KEY_COSTUME, costumeId);
             PlayerPrefs.Save();
         }
 
@@ -144,8 +201,20 @@ namespace SmartSpace.Network
                 gender = this.gender,
                 age = this.age,
                 bio = this.bio,
-                level = this.level
+                level = this.level,
+                uid = this.uid,
+                region = this.region,
+                guild = this.guild,
+                title = this.title,
+                flowers = this.flowers,
+                achievePoints = this.achievePoints,
+                residenceDays = this.residenceDays,
+                friendsCount = this.friendsCount,
+                costumeId = this.costumeId,
+                birthday = this.birthday,
+                status = this.status
             };
         }
+
     }
 }

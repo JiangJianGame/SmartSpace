@@ -1,5 +1,6 @@
 using System.Collections;
 using UnityEngine;
+using SmartSpace.Network;
 using SmartSpace.Network.Schema;
 using SmartSpace.UI;
 
@@ -63,6 +64,40 @@ namespace SmartSpace.Character
             {
                 overheadUI.SetUsername(Username, false);
             }
+
+            ApplyAvatarVisual(AvatarId);
+        }
+
+        public void ApplyAvatarVisual(int avatarIndex)
+        {
+            if (visualRoot != null)
+            {
+                var body = visualRoot.Find("Body");
+                if (body != null)
+                {
+                    var ren = body.GetComponent<MeshRenderer>();
+                    if (ren != null)
+                    {
+                        Color[] costumeColors = new Color[]
+                        {
+                            new Color(1.0f, 0.85f, 0.2f),  // 0: 虎龙誓印 (Gold)
+                            new Color(1.0f, 0.2f, 0.25f),  // 1: 新春风旅人 (Red)
+                            new Color(0.95f, 0.95f, 0.98f),// 2: 单身东京狗 (White)
+                            new Color(0.0f, 0.9f, 0.85f),  // 3: 森罗灵弓 (Cyan)
+                            new Color(1.0f, 0.4f, 0.7f),   // 4: 周年卫衣 (Pink)
+                            new Color(0.95f, 0.75f, 0.2f), // 5: 梦中花海 (Yellow)
+                            new Color(0.5f, 0.25f, 0.95f), // 6: 周年庆典 (Purple)
+                            new Color(0.25f, 0.6f, 0.95f), // 7: 经典蓝灰 (Blue)
+                            new Color(1.0f, 0.25f, 0.15f), // 8: 烈焰战甲 (Flame)
+                            new Color(0.15f, 0.85f, 0.45f),// 9: 灵溪法袍 (Emerald)
+                            new Color(0.45f, 0.15f, 0.95f),// 10: 暗夜行者 (Dark Violet)
+                            new Color(1.0f, 0.85f, 0.15f)  // 11: 黄金神圣 (Holy Gold)
+                        };
+                        int safeIdx = Mathf.Clamp(avatarIndex, 0, costumeColors.Length - 1);
+                        ren.material.color = costumeColors[safeIdx];
+                    }
+                }
+            }
         }
 
         public void UpdateFromSchema(Player playerSchema)
@@ -75,7 +110,11 @@ namespace SmartSpace.Character
                     overheadUI.SetUsername(Username, false);
                 }
             }
-            AvatarId = playerSchema.avatarId;
+            if (AvatarId != playerSchema.avatarId)
+            {
+                AvatarId = playerSchema.avatarId;
+                ApplyAvatarVisual(AvatarId);
+            }
 
             Vector3 newPos = new Vector3((float)playerSchema.x, (float)playerSchema.y, (float)playerSchema.z);
 

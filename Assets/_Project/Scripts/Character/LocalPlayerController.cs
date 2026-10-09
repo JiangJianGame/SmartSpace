@@ -52,6 +52,40 @@ namespace SmartSpace.Character
             {
                 overheadUI.SetUsername(Username, true);
             }
+
+            ApplyAvatarVisual(newAvatarId);
+        }
+
+        public void ApplyAvatarVisual(int avatarIndex)
+        {
+            if (visualTransform != null)
+            {
+                var body = visualTransform.Find("Body");
+                if (body != null)
+                {
+                    var ren = body.GetComponent<MeshRenderer>();
+                    if (ren != null)
+                    {
+                        Color[] costumeColors = new Color[]
+                        {
+                            new Color(1.0f, 0.85f, 0.2f),  // 0: 虎龙誓印 (Gold)
+                            new Color(1.0f, 0.2f, 0.25f),  // 1: 新春风旅人 (Red)
+                            new Color(0.95f, 0.95f, 0.98f),// 2: 单身东京狗 (White)
+                            new Color(0.0f, 0.9f, 0.85f),  // 3: 森罗灵弓 (Cyan)
+                            new Color(1.0f, 0.4f, 0.7f),   // 4: 周年卫衣 (Pink)
+                            new Color(0.95f, 0.75f, 0.2f), // 5: 梦中花海 (Yellow)
+                            new Color(0.5f, 0.25f, 0.95f), // 6: 周年庆典 (Purple)
+                            new Color(0.25f, 0.6f, 0.95f), // 7: 经典蓝灰 (Blue)
+                            new Color(1.0f, 0.25f, 0.15f), // 8: 烈焰战甲 (Flame)
+                            new Color(0.15f, 0.85f, 0.45f),// 9: 灵溪法袍 (Emerald)
+                            new Color(0.45f, 0.15f, 0.95f),// 10: 暗夜行者 (Dark Violet)
+                            new Color(1.0f, 0.85f, 0.15f)  // 11: 黄金神圣 (Holy Gold)
+                        };
+                        int safeIdx = Mathf.Clamp(avatarIndex, 0, costumeColors.Length - 1);
+                        ren.material.color = costumeColors[safeIdx];
+                    }
+                }
+            }
         }
 
         private void Awake()
@@ -79,7 +113,18 @@ namespace SmartSpace.Character
 
             if (overheadUI != null)
             {
-                overheadUI.SetUsername(Username, true);
+                string t = (NetworkManager.Instance != null && NetworkManager.Instance.LocalProfile != null) ? NetworkManager.Instance.LocalProfile.title : "天赋异禀";
+                overheadUI.SetUsernameAndTitle(Username, t, true);
+            }
+
+            ApplyAvatarVisual(AvatarId);
+        }
+
+        public void UpdateOverheadTitle(string title)
+        {
+            if (overheadUI != null)
+            {
+                overheadUI.SetTitle(title);
             }
         }
 
@@ -97,7 +142,7 @@ namespace SmartSpace.Character
                 _velocity.y = -2f; // Slight downward push to keep grounded
             }
 
-            if (SmartSpace.UI.DemoHUD.IsTyping)
+            if (SmartSpace.UI.DemoHUD.IsTyping || SmartSpace.UI.WardrobeSceneController.IsInWardrobeScene)
             {
                 _velocity.x = 0;
                 _velocity.z = 0;
@@ -229,6 +274,19 @@ namespace SmartSpace.Character
             if (NetworkManager.Instance != null && NetworkManager.Instance.IsConnected)
             {
                 NetworkManager.Instance.SendEmote(emoteId);
+            }
+        }
+
+        public void ShowOverhead2DEmote(string emoteName, string emoteSymbol)
+        {
+            if (overheadUI != null)
+            {
+                overheadUI.Show2DEmote(emoteName, emoteSymbol);
+            }
+
+            if (_emoteEffects != null)
+            {
+                _emoteEffects.PlayEmoteFeedback(EmoteType.Heart);
             }
         }
 

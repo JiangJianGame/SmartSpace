@@ -17,6 +17,27 @@ namespace SmartSpace.Character
 
         private float _yaw = 0f;
         private float _pitch = 15f;
+        private Light _studioLight;
+
+        public static ThirdPersonCamera Instance { get; private set; }
+
+        public bool IsProfileViewMode { get; set; } = false;
+        public Transform ProfileTarget { get; set; }
+
+        private void Awake()
+        {
+            Instance = this;
+
+            _studioLight = GetComponent<Light>();
+            if (_studioLight == null)
+            {
+                _studioLight = gameObject.AddComponent<Light>();
+                _studioLight.type = LightType.Directional;
+                _studioLight.intensity = 0.9f;
+                _studioLight.color = new Color(1.0f, 0.96f, 0.92f);
+                _studioLight.enabled = false;
+            }
+        }
 
         public void SetTarget(Transform newTarget)
         {
@@ -26,6 +47,10 @@ namespace SmartSpace.Character
                 _yaw = target.eulerAngles.y;
             }
         }
+
+        private bool _wasInProfileView = false;
+        private Vector3 _profileLockedCamPos;
+        private Quaternion _profileLockedCamRot;
 
         private void LateUpdate()
         {
@@ -39,6 +64,37 @@ namespace SmartSpace.Character
                     _yaw = target.eulerAngles.y;
                 }
                 return;
+            }
+
+            if (IsProfileViewMode)
+            {
+                Transform viewTarget = ProfileTarget != null ? ProfileTarget : target;
+                if (viewTarget != null)
+                {
+                    if (!_wasInProfileView)
+                    {
+                        _wasInProfileView = true;
+                        Vector3 fwd = viewTarget.forward;
+                        Vector3 right = viewTarget.right;
+                        Vector3 up = Vector3.up;
+
+                        // Camera positioned in front of character, with lookPoint shifted to screen right
+                        // so the character is framed centered horizontally at 27.4% from screen left
+                        _profileLockedCamPos = viewTarget.position + fwd * 2.7f + up * 0.95f;
+                        Vector3 lookPoint = viewTarget.position - right * 1.25f + up * 0.95f;
+                        _profileLockedCamRot = Quaternion.LookRotation(lookPoint - _profileLockedCamPos);
+                    }
+
+                    transform.position = Vector3.Lerp(transform.position, _profileLockedCamPos, Time.deltaTime * smoothSpeed);
+                    transform.rotation = Quaternion.Slerp(transform.rotation, _profileLockedCamRot, Time.deltaTime * smoothSpeed);
+                }
+                if (_studioLight != null) _studioLight.enabled = true;
+                return;
+            }
+            else
+            {
+                _wasInProfileView = false;
+                if (_studioLight != null) _studioLight.enabled = false;
             }
 
             // Mouse orbit when right mouse button held or by default
