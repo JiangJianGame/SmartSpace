@@ -606,7 +606,7 @@ namespace SmartSpace.UI
             var textMesh = ov.AddComponent<TMPro.TextMeshPro>();
             textMesh.fontSize = 1.6f;
             textMesh.alignment = TMPro.TextAlignmentOptions.Center;
-            textMesh.text = "<size=75%><color=#FFD54F><b>【星际旅者】</b></color></size>\n<color=#00E5FF>展示模特</color>";
+            textMesh.text = "<color=#00E5FF>展示模特</color>";
             var rt = ov.GetComponent<RectTransform>();
             if (rt != null) rt.sizeDelta = new Vector2(4f, 1f);
 
@@ -634,13 +634,13 @@ namespace SmartSpace.UI
             _costumeList.Add(new CostumeData(11, "黄金神圣", "服装", "传说", "散发纯粹圣洁光芒的炽阳重甲", new Color(1.0f, 0.85f, 0.15f), new Color(1.0f, 0.6f, 0.0f)));
 
             _titleList.Clear();
-            _titleList.Add(new TitleData("星际旅者", "典藏限定", new Color(1.0f, 0.84f, 0.0f), "空间漫游", 500, "登录智慧空间满 30 天", true));
-            _titleList.Add(new TitleData("天赋异禀", "传说", new Color(0.9f, 0.4f, 1.0f), "空间漫游", 350, "首次达成全图探索 100%", true));
-            _titleList.Add(new TitleData("社交达人", "史诗", new Color(0.2f, 0.8f, 1.0f), "社交达人", 200, "添加好友数量超过 10 人", true));
-            _titleList.Add(new TitleData("深渊征服者", "传说", new Color(0.9f, 0.4f, 1.0f), "副本荣耀", 400, "通关英雄副本第 5 层", true));
-            _titleList.Add(new TitleData("十周年老兵", "典藏限定", new Color(1.0f, 0.84f, 0.0f), "典藏限定", 800, "参与十周年庆典并获得限定套装", true));
-            _titleList.Add(new TitleData("潮玩收藏家", "稀有", new Color(0.2f, 0.9f, 0.4f), "空间漫游", 150, "解锁 6 套以上时装装扮", true));
-            _titleList.Add(new TitleData("幻梦之声", "史诗", new Color(0.2f, 0.8f, 1.0f), "社交达人", 250, "发送世界大喇叭 5 次", true));
+            _titleList.Add(new TitleData("星际旅者", "典藏限定", new Color(1.0f, 0.84f, 0.0f), "空间漫游", 500, "登录智慧空间满 30 天", false));
+            _titleList.Add(new TitleData("天赋异禀", "传说", new Color(0.9f, 0.4f, 1.0f), "空间漫游", 350, "首次达成全图探索 100%", false));
+            _titleList.Add(new TitleData("社交达人", "史诗", new Color(0.2f, 0.8f, 1.0f), "社交达人", 200, "添加好友数量超过 10 人", false));
+            _titleList.Add(new TitleData("深渊征服者", "传说", new Color(0.9f, 0.4f, 1.0f), "副本荣耀", 400, "通关英雄副本第 5 层", false));
+            _titleList.Add(new TitleData("十周年老兵", "典藏限定", new Color(1.0f, 0.84f, 0.0f), "典藏限定", 800, "参与十周年庆典并获得限定套装", false));
+            _titleList.Add(new TitleData("潮玩收藏家", "稀有", new Color(0.2f, 0.9f, 0.4f), "空间漫游", 150, "解锁 6 套以上时装装扮", false));
+            _titleList.Add(new TitleData("幻梦之声", "史诗", new Color(0.2f, 0.8f, 1.0f), "社交达人", 250, "发送世界大喇叭 5 次", false));
             _titleList.Add(new TitleData("暗夜终结者", "传说", new Color(0.9f, 0.4f, 1.0f), "副本荣耀", 450, "单人击败暗夜终极首领", false));
         }
 
@@ -769,6 +769,12 @@ namespace SmartSpace.UI
         public void SaveAndEquipCostume()
         {
             if (_workingProfile == null) return;
+
+            if (!_workingProfile.IsCostumeUnlocked(_previewCostumeId))
+            {
+                ShowToast($"❌ 时装【{GetCostumeName(_previewCostumeId)}】尚未解锁，无法穿戴！");
+                return;
+            }
 
             _workingProfile.costumeId = _previewCostumeId;
             _workingProfile.SaveToPrefs();

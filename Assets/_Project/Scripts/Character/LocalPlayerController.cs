@@ -113,11 +113,12 @@ namespace SmartSpace.Character
 
             if (overheadUI != null)
             {
-                string t = (NetworkManager.Instance != null && NetworkManager.Instance.LocalProfile != null) ? NetworkManager.Instance.LocalProfile.title : "天赋异禀";
+                string t = (NetworkManager.Instance != null && NetworkManager.Instance.LocalProfile != null) ? NetworkManager.Instance.LocalProfile.title : "";
                 overheadUI.SetUsernameAndTitle(Username, t, true);
             }
 
-            ApplyAvatarVisual(AvatarId);
+            int costume = (NetworkManager.Instance != null && NetworkManager.Instance.LocalProfile != null) ? NetworkManager.Instance.LocalProfile.costumeId : 7;
+            ApplyAvatarVisual(costume);
         }
 
         public void UpdateOverheadTitle(string title)

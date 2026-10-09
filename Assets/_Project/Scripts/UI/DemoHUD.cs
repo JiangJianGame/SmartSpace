@@ -239,7 +239,9 @@ namespace SmartSpace.UI
             public Color primaryColor;
             public Color accentColor;
             public Texture2D iconTex;
-            public CostumeItem(int id, string name, string category, string styleTag, string desc, Color primary, Color accent)
+            public bool isUnlocked;
+
+            public CostumeItem(int id, string name, string category, string styleTag, string desc, Color primary, Color accent, bool isUnlocked = false)
             {
                 this.id = id;
                 this.name = name;
@@ -248,6 +250,7 @@ namespace SmartSpace.UI
                 this.desc = desc;
                 this.primaryColor = primary;
                 this.accentColor = accent;
+                this.isUnlocked = isUnlocked;
             }
         }
         private readonly List<CostumeItem> _costumeItems = new List<CostumeItem>();
@@ -1467,8 +1470,8 @@ namespace SmartSpace.UI
             }
         }
 
-        private const string PREF_KEY_PHOTOS_INIT = "SmartSpace_PhotosInitialized";
-        private const string PREF_KEY_PHOTOS_DATA = "SmartSpace_PhotosData";
+        private const string PREF_KEY_PHOTOS_INIT = "SmartSpace_PhotosInitialized_v2";
+        private const string PREF_KEY_PHOTOS_DATA = "SmartSpace_PhotosData_v2";
 
         private string GetPhotosDirectory()
         {
@@ -1555,12 +1558,8 @@ namespace SmartSpace.UI
             }
             else
             {
+                // 初始化全新档案：精选相册一开始为空，由玩家后续拍摄或上传
                 _featuredPhotos.Clear();
-                _featuredPhotos.Add(new ProfilePhotoItem("星辉漫游", 328, MakePresetPhotoTex(0), 0));
-                _featuredPhotos.Add(new ProfilePhotoItem("浮空圣岛", 215, MakePresetPhotoTex(1), 1));
-                _featuredPhotos.Add(new ProfilePhotoItem("大星云境", 184, MakePresetPhotoTex(2), 2));
-                _featuredPhotos.Add(new ProfilePhotoItem("熔金落日", 260, MakePresetPhotoTex(3), 3));
-                _featuredPhotos.Add(new ProfilePhotoItem("极光天穹", 192, MakePresetPhotoTex(4), 4));
                 SaveFeaturedPhotosMetadata();
             }
 
@@ -4308,20 +4307,13 @@ namespace SmartSpace.UI
 
                 GUILayout.Space(4);
 
-                // Gender row
+                // Gender row (游戏内不可更改)
                 GUILayout.BeginHorizontal();
                 GUILayout.Label("<size=11><color=#90A4AE>性别:</color></size>", _marqueeStyle, GUILayout.Width(42));
-                string[] genders = new string[] { "male", "female", "secret" };
-                string[] gLabels = new string[] { "♂ 男生", "♀ 女生", "✦ 保密" };
-                for (int g = 0; g < 3; g++)
-                {
-                    bool isSel = _editingProfile.gender == genders[g];
-                    if (GUILayout.Button(gLabels[g], isSel ? _tabActiveStyle : _tabInactiveStyle, GUILayout.Width(68), GUILayout.Height(22)))
-                    {
-                        _editingProfile.gender = genders[g];
-                    }
-                    GUILayout.Space(4);
-                }
+                string editGSymbol = UserProfile.GetGenderSymbol(_editingProfile.gender);
+                string editGColor = UserProfile.GetGenderColor(_editingProfile.gender);
+                string editGLabel = UserProfile.GetGenderLabel(_editingProfile.gender);
+                GUILayout.Label($"<size=11><color={editGColor}><b>{editGSymbol} {editGLabel}</b></color> <color=#78909C>(不可更改)</color></size>", _marqueeStyle, GUILayout.Width(130), GUILayout.Height(22));
                 GUILayout.Space(10);
                 // Region input
                 GUILayout.Label("<size=11><color=#90A4AE>属地:</color></size>", _marqueeStyle, GUILayout.Width(42));
@@ -4910,7 +4902,7 @@ namespace SmartSpace.UI
                 if (GUI.Button(sRect, schemeNames[i], st))
                 {
                     _selectedCostumeScheme = i;
-                    int[] schemePresets = new int[] { 0, 4, 8, 11 };
+                    int[] schemePresets = new int[] { 7, 7, 7, 7 };
                     _previewCostumeId = schemePresets[i];
                     if (WardrobeSceneController.Instance != null)
                     {
@@ -4929,10 +4921,18 @@ namespace SmartSpace.UI
             Rect bookRect = new Rect(startX, Screen.height - 76f, 84f, 44f);
             if (GUI.Button(bookRect, "👕 时装图鉴", _sideActionBtnStyle))
             {
-                AddSystemMessage("【时装图鉴】已收录空间典藏 12 件限定装扮，当前全套解锁进度：100%！✨");
+                var curProf = (_editingProfile != null) ? _editingProfile : ((NetworkManager.Instance != null && NetworkManager.Instance.LocalProfile != null) ? NetworkManager.Instance.LocalProfile : UserProfile.LoadFromPrefs());
+                int ownedCount = 0;
+                foreach (var it in _costumeItems)
+                {
+                    if (curProf != null && curProf.IsCostumeUnlocked(it.id)) ownedCount++;
+                }
+                int totalCount = _costumeItems.Count > 0 ? _costumeItems.Count : 12;
+                float pct = (float)ownedCount / totalCount * 100f;
+                AddSystemMessage($"【时装图鉴】已收录空间典藏 {totalCount} 件限定装扮，当前全套解锁进度：{ownedCount}/{totalCount} ({pct:F0}%)！✨");
             }
 
-            // 3. Feet area: "首次无消耗" hint & Gender toggle
+            // 3. Feet area: "首次无消耗" hint (游戏内不可切换性别)
             float tabW = 46f;
             float cardW = Mathf.Clamp(Screen.width * 0.54f, 550f, 740f);
             float cardX = Screen.width - cardW - tabW - 24f;
@@ -4944,20 +4944,6 @@ namespace SmartSpace.UI
 
             Rect hintRect = new Rect(centerX - 60f, footY - 24f, 120f, 20f);
             GUI.Label(hintRect, "<size=10><color=#80D8FF><b>首次无消耗</b></color></size>", _profileStageHintStyle ?? _marqueeStyle);
-
-            Rect genderRect = new Rect(centerX - 24f, footY, 48f, 28f);
-            string gIcon = (_editingProfile != null && _editingProfile.gender == "female") ? "♀ 女" : "♂ 男";
-            Color prevBg = GUI.backgroundColor;
-            GUI.backgroundColor = (_editingProfile != null && _editingProfile.gender == "female") ? new Color(1f, 0.4f, 0.7f) : new Color(0.2f, 0.7f, 1f);
-            if (GUI.Button(genderRect, gIcon, _tabActiveStyle))
-            {
-                if (_editingProfile != null)
-                {
-                    _editingProfile.gender = (_editingProfile.gender == "female") ? "male" : "female";
-                    AddSystemMessage($"已切换形象预览性别：{UserProfile.GetGenderLabel(_editingProfile.gender)}");
-                }
-            }
-            GUI.backgroundColor = prevBg;
         }
 
         private void InitCostumes()
@@ -4966,18 +4952,18 @@ namespace SmartSpace.UI
             _costumesInitialized = true;
 
             _costumeItems.Clear();
-            _costumeItems.Add(new CostumeItem(0, "虎龙誓印", "法阵", "古风", "龙虎金光环绕护体法阵", new Color(1.0f, 0.85f, 0.2f), new Color(1.0f, 0.45f, 0.0f)));
-            _costumeItems.Add(new CostumeItem(1, "新春风旅人", "手持", "典藏", "春风拂面的祥瑞风车道具", new Color(1.0f, 0.2f, 0.25f), new Color(1.0f, 0.85f, 0.2f)));
-            _costumeItems.Add(new CostumeItem(2, "单身东京狗", "背部", "浪漫", "治愈系可爱白色萌犬背饰", new Color(0.95f, 0.95f, 0.95f), new Color(0.3f, 0.75f, 1.0f)));
-            _costumeItems.Add(new CostumeItem(3, "森罗灵弓", "手持", "复古", "自然森罗之力凝聚而成的灵弓", new Color(0.0f, 0.9f, 0.85f), new Color(0.1f, 0.8f, 0.4f)));
-            _costumeItems.Add(new CostumeItem(4, "周年庆典卫衣", "服装", "现代", "奥拉星周年庆典限定潮牌卫衣", new Color(0.95f, 0.95f, 0.98f), new Color(1.0f, 0.35f, 0.6f)));
-            _costumeItems.Add(new CostumeItem(5, "梦中花海", "背景", "浪漫", "阳光洒落在花海之上的梦幻背景", new Color(1.0f, 0.9f, 0.4f), new Color(0.2f, 0.7f, 1.0f)));
-            _costumeItems.Add(new CostumeItem(6, "周年庆典", "背景", "浪漫", "漫天繁星与庆典彩带浪漫夜景", new Color(0.5f, 0.25f, 0.95f), new Color(1.0f, 0.85f, 0.2f)));
-            _costumeItems.Add(new CostumeItem(7, "经典蓝灰", "服装", "现代", "奥拉星标准轻装探索服", new Color(0.25f, 0.6f, 0.95f), new Color(0.4f, 0.5f, 0.6f)));
-            _costumeItems.Add(new CostumeItem(8, "烈焰战甲", "服装", "史诗", "注入烈火高温的高阶作战战甲", new Color(1.0f, 0.25f, 0.15f), new Color(1.0f, 0.65f, 0.1f)));
-            _costumeItems.Add(new CostumeItem(9, "灵溪法袍", "服装", "稀有", "流淌生命灵溪的治愈系法袍", new Color(0.15f, 0.85f, 0.45f), new Color(0.0f, 0.95f, 0.85f)));
-            _costumeItems.Add(new CostumeItem(10, "暗夜行者", "服装", "典藏", "隐匿于虚空之影的潜行夜行装", new Color(0.45f, 0.15f, 0.95f), new Color(0.85f, 0.2f, 0.95f)));
-            _costumeItems.Add(new CostumeItem(11, "黄金神圣", "服装", "传说", "散发圣光辉芒的纯金定制战甲", new Color(1.0f, 0.85f, 0.15f), new Color(1.0f, 0.6f, 0.0f)));
+            _costumeItems.Add(new CostumeItem(0, "虎龙誓印", "法阵", "古风", "龙虎金光环绕护体法阵", new Color(1.0f, 0.85f, 0.2f), new Color(1.0f, 0.45f, 0.0f), false));
+            _costumeItems.Add(new CostumeItem(1, "新春风旅人", "手持", "典藏", "春风拂面的祥瑞风车道具", new Color(1.0f, 0.2f, 0.25f), new Color(1.0f, 0.85f, 0.2f), false));
+            _costumeItems.Add(new CostumeItem(2, "单身东京狗", "背部", "浪漫", "治愈系可爱白色萌犬背饰", new Color(0.95f, 0.95f, 0.95f), new Color(0.3f, 0.75f, 1.0f), false));
+            _costumeItems.Add(new CostumeItem(3, "森罗灵弓", "手持", "复古", "自然森罗之力凝聚而成的灵弓", new Color(0.0f, 0.9f, 0.85f), new Color(0.1f, 0.8f, 0.4f), false));
+            _costumeItems.Add(new CostumeItem(4, "周年庆典卫衣", "服装", "现代", "奥拉星周年庆典限定潮牌卫衣", new Color(0.95f, 0.95f, 0.98f), new Color(1.0f, 0.35f, 0.6f), false));
+            _costumeItems.Add(new CostumeItem(5, "梦中花海", "背景", "浪漫", "阳光洒落在花海之上的梦幻背景", new Color(1.0f, 0.9f, 0.4f), new Color(0.2f, 0.7f, 1.0f), false));
+            _costumeItems.Add(new CostumeItem(6, "周年庆典", "背景", "浪漫", "漫天繁星与庆典彩带浪漫夜景", new Color(0.5f, 0.25f, 0.95f), new Color(1.0f, 0.85f, 0.2f), false));
+            _costumeItems.Add(new CostumeItem(7, "经典蓝灰", "服装", "现代", "奥拉星标准轻装探索服", new Color(0.25f, 0.6f, 0.95f), new Color(0.4f, 0.5f, 0.6f), true));
+            _costumeItems.Add(new CostumeItem(8, "烈焰战甲", "服装", "史诗", "注入烈火高温的高阶作战战甲", new Color(1.0f, 0.25f, 0.15f), new Color(1.0f, 0.65f, 0.1f), false));
+            _costumeItems.Add(new CostumeItem(9, "灵溪法袍", "服装", "稀有", "流淌生命灵溪的治愈系法袍", new Color(0.15f, 0.85f, 0.45f), new Color(0.0f, 0.95f, 0.85f), false));
+            _costumeItems.Add(new CostumeItem(10, "暗夜行者", "服装", "典藏", "隐匿于虚空之影的潜行夜行装", new Color(0.45f, 0.15f, 0.95f), new Color(0.85f, 0.2f, 0.95f), false));
+            _costumeItems.Add(new CostumeItem(11, "黄金神圣", "服装", "传说", "散发圣光辉芒的纯金定制战甲", new Color(1.0f, 0.85f, 0.15f), new Color(1.0f, 0.6f, 0.0f), false));
 
             foreach (var item in _costumeItems)
             {
@@ -5146,7 +5132,15 @@ namespace SmartSpace.UI
                         };
                         GUILayout.Label($"<size=10><color={tagColor}><b>[{item.styleTag}]</b></color></size>", _marqueeStyle, GUILayout.Height(16));
                         GUILayout.FlexibleSpace();
-                        GUILayout.Label("<size=10><color=#00E5FF><b>永久</b></color></size>", _marqueeStyle, GUILayout.Height(16));
+                        bool isItemUnlocked = prof != null && prof.IsCostumeUnlocked(item.id);
+                        if (isItemUnlocked)
+                        {
+                            GUILayout.Label("<size=10><color=#00E5FF><b>永久</b></color></size>", _marqueeStyle, GUILayout.Height(16));
+                        }
+                        else
+                        {
+                            GUILayout.Label("<size=10><color=#90A4AE><b>🔒 未解锁</b></color></size>", _marqueeStyle, GUILayout.Height(16));
+                        }
                         GUILayout.Space(3);
                         GUILayout.EndHorizontal();
 
@@ -5175,11 +5169,22 @@ namespace SmartSpace.UI
                         }
                         else if (isPreviewing)
                         {
-                            GUILayout.Label("<size=10><color=#00E5FF>● 试穿中</color></size>", _marqueeStyle, GUILayout.Height(14));
+                            if (isItemUnlocked)
+                            {
+                                GUILayout.Label("<size=10><color=#00E5FF>● 试穿中</color></size>", _marqueeStyle, GUILayout.Height(14));
+                            }
+                            else
+                            {
+                                GUILayout.Label("<size=10><color=#FFB74D>● 试穿(未拥有)</color></size>", _marqueeStyle, GUILayout.Height(14));
+                            }
+                        }
+                        else if (isItemUnlocked)
+                        {
+                            GUILayout.Label("<size=10><color=#80D8FF>● 已拥有</color></size>", _marqueeStyle, GUILayout.Height(14));
                         }
                         else
                         {
-                            GUILayout.Label($"<size=10><color=#78909C>{item.category}</color></size>", _marqueeStyle, GUILayout.Height(14));
+                            GUILayout.Label($"<size=10><color=#78909C>🔒 未解锁</color></size>", _marqueeStyle, GUILayout.Height(14));
                         }
                         GUILayout.FlexibleSpace();
                         GUILayout.EndHorizontal();
@@ -5222,21 +5227,31 @@ namespace SmartSpace.UI
             GUILayout.BeginHorizontal();
             if (isSelf)
             {
-                if (GUILayout.Button("💾  保存并穿戴", _modalPrimaryBtnStyle, GUILayout.Width(140), GUILayout.Height(36)))
+                bool canEquip = prof != null && prof.IsCostumeUnlocked(_previewCostumeId);
+                if (canEquip)
                 {
-                    _editingProfile.costumeId = _previewCostumeId;
-                    prof.costumeId = _previewCostumeId;
-                    prof.SaveToPrefs();
-                    if (NetworkManager.Instance != null)
+                    if (GUILayout.Button("💾  保存并穿戴", _modalPrimaryBtnStyle, GUILayout.Width(140), GUILayout.Height(36)))
                     {
-                        NetworkManager.Instance.UpdateProfile(_editingProfile);
+                        _editingProfile.costumeId = _previewCostumeId;
+                        prof.costumeId = _previewCostumeId;
+                        prof.SaveToPrefs();
+                        if (NetworkManager.Instance != null)
+                        {
+                            NetworkManager.Instance.UpdateProfile(_editingProfile);
+                        }
+                        if (WardrobeSceneController.Instance != null)
+                        {
+                            WardrobeSceneController.Instance.SaveAndEquipCostume();
+                        }
+                        string selName = (_previewCostumeId >= 0 && _previewCostumeId < _costumeItems.Count) ? _costumeItems[_previewCostumeId].name : "专属时装";
+                        AddSystemMessage($"已成功穿戴时装【<color=#00E5FF>{selName}</color>】并在空间全服同步！✨");
                     }
-                    if (WardrobeSceneController.Instance != null)
-                    {
-                        WardrobeSceneController.Instance.SaveAndEquipCostume();
-                    }
-                    string selName = (_previewCostumeId >= 0 && _previewCostumeId < _costumeItems.Count) ? _costumeItems[_previewCostumeId].name : "专属时装";
-                    AddSystemMessage($"已成功穿戴时装【<color=#00E5FF>{selName}</color>】并在空间全服同步！✨");
+                }
+                else
+                {
+                    GUI.enabled = false;
+                    GUILayout.Button("🔒  未解锁该时装", _modalSecondaryBtnStyle, GUILayout.Width(140), GUILayout.Height(36));
+                    GUI.enabled = true;
                 }
 
                 GUILayout.Space(8);
@@ -5279,16 +5294,16 @@ namespace SmartSpace.UI
             _achievementsInitialized = true;
 
             _achievementTitles.Clear();
-            _achievementTitles.Add(new AchievementTitleItem("天赋异禀", "传说", new Color(1.0f, 0.85f, 0.2f), "典藏限定", 200, "在奥拉星智慧空间完成全面成长挑战", true, "100% (已达成)"));
-            _achievementTitles.Add(new AchievementTitleItem("星海漫游者", "史诗", new Color(0.88f, 0.35f, 1.0f), "空间漫游", 150, "在智慧大空间内自由探索漫游累计超过 100 公里", true, "100% (已达成)"));
-            _achievementTitles.Add(new AchievementTitleItem("社交天花板", "史诗", new Color(0.88f, 0.35f, 1.0f), "社交达人", 150, "结交空间好友达到 8 位并进行深度社交互动", true, "100% (已达成)"));
-            _achievementTitles.Add(new AchievementTitleItem("鲜花万人迷", "稀有", new Color(1.0f, 0.35f, 0.65f), "社交达人", 120, "累计收到空间好友赠送的 4000 朵鲜花", true, "100% (已达成)"));
-            _achievementTitles.Add(new AchievementTitleItem("暗夜征服者", "稀有", new Color(1.0f, 0.35f, 0.35f), "副本荣耀", 120, "加入副本攻坚队并完成暗夜之城英雄副本挑战", true, "100% (已达成)"));
-            _achievementTitles.Add(new AchievementTitleItem("造物先行者", "经典", new Color(0.0f, 0.9f, 1.0f), "空间漫游", 100, "在空间相册首次上传并发布精选打卡照片", true, "100% (已达成)"));
-            _achievementTitles.Add(new AchievementTitleItem("元气满满", "经典", new Color(0.2f, 0.95f, 0.5f), "空间漫游", 100, "在智慧空间连续打卡漫游 30 天", true, "100% (已达成)"));
-            _achievementTitles.Add(new AchievementTitleItem("奥拉之星", "传说", new Color(1.0f, 0.85f, 0.2f), "典藏限定", 300, "达成智慧空间年度漫游大使荣誉认证", true, "100% (已达成)"));
-            _achievementTitles.Add(new AchievementTitleItem("百团战神", "史诗", new Color(1.0f, 0.65f, 0.2f), "副本荣耀", 200, "累计参与 50 场智慧空间团队协作活动", false, "32/50 (进行中)"));
-            _achievementTitles.Add(new AchievementTitleItem("虚空主宰", "传说", new Color(1.0f, 0.85f, 0.2f), "典藏限定", 500, "在隐藏星域发现并激活 10 处失落的古代星石", false, "3/10 (进行中)"));
+            _achievementTitles.Add(new AchievementTitleItem("天赋异禀", "传说", new Color(1.0f, 0.85f, 0.2f), "典藏限定", 200, "在奥拉星智慧空间完成全面成长挑战", false, "0% (未达成)"));
+            _achievementTitles.Add(new AchievementTitleItem("星海漫游者", "史诗", new Color(0.88f, 0.35f, 1.0f), "空间漫游", 150, "在智慧大空间内自由探索漫游累计超过 100 公里", false, "0% (未达成)"));
+            _achievementTitles.Add(new AchievementTitleItem("社交天花板", "史诗", new Color(0.88f, 0.35f, 1.0f), "社交达人", 150, "结交空间好友达到 8 位并进行深度社交互动", false, "0% (未达成)"));
+            _achievementTitles.Add(new AchievementTitleItem("鲜花万人迷", "稀有", new Color(1.0f, 0.35f, 0.65f), "社交达人", 120, "累计收到空间好友赠送的 4000 朵鲜花", false, "0% (未达成)"));
+            _achievementTitles.Add(new AchievementTitleItem("暗夜征服者", "稀有", new Color(1.0f, 0.35f, 0.35f), "副本荣耀", 120, "加入副本攻坚队并完成暗夜之城英雄副本挑战", false, "0% (未达成)"));
+            _achievementTitles.Add(new AchievementTitleItem("造物先行者", "经典", new Color(0.0f, 0.9f, 1.0f), "空间漫游", 100, "在空间相册首次上传并发布精选打卡照片", false, "0% (未达成)"));
+            _achievementTitles.Add(new AchievementTitleItem("元气满满", "经典", new Color(0.2f, 0.95f, 0.5f), "空间漫游", 100, "在智慧空间连续打卡漫游 30 天", false, "0% (未达成)"));
+            _achievementTitles.Add(new AchievementTitleItem("奥拉之星", "传说", new Color(1.0f, 0.85f, 0.2f), "典藏限定", 300, "达成智慧空间年度漫游大使荣誉认证", false, "0% (未达成)"));
+            _achievementTitles.Add(new AchievementTitleItem("百团战神", "史诗", new Color(1.0f, 0.65f, 0.2f), "副本荣耀", 200, "累计参与 50 场智慧空间团队协作活动", false, "0/50 (未达成)"));
+            _achievementTitles.Add(new AchievementTitleItem("虚空主宰", "传说", new Color(1.0f, 0.85f, 0.2f), "典藏限定", 500, "在隐藏星域发现并激活 10 处失落的古代星石", false, "0/10 (未达成)"));
         }
 
         private static string FormatTitleDisplay(string title)

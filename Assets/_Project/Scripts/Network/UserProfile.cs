@@ -10,31 +10,36 @@ namespace SmartSpace.Network
         public int avatarId = 0; // 0 ~ 5
         public string gender = "secret"; // "male" | "female" | "secret"
         public int age = 0; // 0 表示保密/未填, 1~120
-        public string bio = "探索智慧空间，结交好友！";
-        public int level = 100;
+        public string bio = "这家伙太懒，什么都没留下...";
+        public int level = 1;
         public string uid = "9474911";
-        public string region = "中国湖北";
+        public string region = "未知";
         public string guild = "无";
-        public string title = "天赋异禀";
-        public string birthday = "2002-05-20";
-        public string status = "休闲中 ☕";
-        public int flowers = 4080;
-        public int achievePoints = 3440;
-        public int residenceDays = 365;
-        public int friendsCount = 8;
-        public int costumeId = 0;
+        public string title = ""; // 初始无佩戴任何称号
+        public string birthday = "保密";
+        public string status = "漫游中 🚀";
+        public int flowers = 0;
+        public int achievePoints = 0;
+        public int residenceDays = 1;
+        public int friendsCount = 0;
+        public int costumeId = 7; // 默认初始制式防护服 (经典蓝灰)
+        public string unlockedCostumes = "7"; // 初始仅拥有经典蓝灰探索服
+        public string unlockedTitles = ""; // 初始无任何已解锁称号
 
         public static readonly string[] StatusPresets = new string[]
         {
+            "漫游中 🚀",
             "休闲中 ☕",
             "放松中 🍃",
-            "漫游中 🚀",
             "发呆中 ☁️",
             "探险中 🗺️",
             "忙碌中 ⚡"
         };
 
         private const string PREF_KEY_HAS_PROFILE = "SmartSpace_HasProfile";
+        private const string PREF_KEY_PROFILE_VERSION = "SmartSpace_Profile_Version";
+        private const int CURRENT_PROFILE_VERSION = 2; // 升级版本号，自动清理迁移旧版测试写死的数值
+
         private const string PREF_KEY_USERNAME = "SmartSpace_Profile_Username";
         private const string PREF_KEY_AVATAR = "SmartSpace_Profile_Avatar";
         private const string PREF_KEY_GENDER = "SmartSpace_Profile_Gender";
@@ -46,9 +51,14 @@ namespace SmartSpace.Network
         private const string PREF_KEY_GUILD = "SmartSpace_Profile_Guild";
         private const string PREF_KEY_TITLE = "SmartSpace_Profile_Title";
         private const string PREF_KEY_FLOWERS = "SmartSpace_Profile_Flowers";
+        private const string PREF_KEY_ACHIEVE_POINTS = "SmartSpace_Profile_AchievePoints";
+        private const string PREF_KEY_RESIDENCE_DAYS = "SmartSpace_Profile_ResidenceDays";
+        private const string PREF_KEY_FRIENDS_COUNT = "SmartSpace_Profile_FriendsCount";
         private const string PREF_KEY_BIRTHDAY = "SmartSpace_Profile_Birthday";
         private const string PREF_KEY_STATUS = "SmartSpace_Profile_Status";
         private const string PREF_KEY_COSTUME = "SmartSpace_Profile_Costume";
+        private const string PREF_KEY_UNLOCKED_COSTUMES = "SmartSpace_Profile_UnlockedCostumes";
+        private const string PREF_KEY_UNLOCKED_TITLES = "SmartSpace_Profile_UnlockedTitles";
 
         public static readonly string[] AvatarNames = new string[]
         {
@@ -82,49 +92,60 @@ namespace SmartSpace.Network
 
         public static bool HasSavedProfile()
         {
-            return PlayerPrefs.GetInt(PREF_KEY_HAS_PROFILE, 0) == 1;
+            return PlayerPrefs.GetInt(PREF_KEY_HAS_PROFILE, 0) == 1 && PlayerPrefs.GetInt(PREF_KEY_PROFILE_VERSION, 0) >= CURRENT_PROFILE_VERSION;
         }
 
         public static UserProfile LoadFromPrefs()
         {
             var p = new UserProfile();
-            if (HasSavedProfile())
+            int version = PlayerPrefs.GetInt(PREF_KEY_PROFILE_VERSION, 0);
+
+            if (HasSavedProfile() && version >= CURRENT_PROFILE_VERSION)
             {
                 p.username = PlayerPrefs.GetString(PREF_KEY_USERNAME, GenerateRandomNickname());
                 p.avatarId = Mathf.Clamp(PlayerPrefs.GetInt(PREF_KEY_AVATAR, 0), 0, AvatarNames.Length - 1);
                 p.gender = PlayerPrefs.GetString(PREF_KEY_GENDER, "secret");
                 p.age = PlayerPrefs.GetInt(PREF_KEY_AGE, 0);
-                p.bio = PlayerPrefs.GetString(PREF_KEY_BIO, "这家伙太懒,什么都没留下...");
-                p.level = PlayerPrefs.GetInt(PREF_KEY_LEVEL, 100);
-                p.uid = PlayerPrefs.GetString(PREF_KEY_UID, "9474911");
-                p.region = PlayerPrefs.GetString(PREF_KEY_REGION, "中国湖北");
+                p.bio = PlayerPrefs.GetString(PREF_KEY_BIO, "这家伙太懒，什么都没留下...");
+                p.level = PlayerPrefs.GetInt(PREF_KEY_LEVEL, 1);
+                p.uid = PlayerPrefs.GetString(PREF_KEY_UID, UnityEngine.Random.Range(1000000, 9999999).ToString());
+                p.region = PlayerPrefs.GetString(PREF_KEY_REGION, "未知");
                 p.guild = PlayerPrefs.GetString(PREF_KEY_GUILD, "无");
-                p.title = PlayerPrefs.GetString(PREF_KEY_TITLE, "天赋异禀");
-                p.flowers = PlayerPrefs.GetInt(PREF_KEY_FLOWERS, 4080);
-                p.birthday = PlayerPrefs.GetString(PREF_KEY_BIRTHDAY, "2002-05-20");
-                if (!string.IsNullOrEmpty(p.birthday) && p.birthday != "保密" && p.birthday.Length <= 5)
-                {
-                    p.birthday = "2002-" + p.birthday;
-                }
-                p.status = PlayerPrefs.GetString(PREF_KEY_STATUS, "休闲中 ☕");
-                p.costumeId = PlayerPrefs.GetInt(PREF_KEY_COSTUME, 0);
+                p.title = PlayerPrefs.GetString(PREF_KEY_TITLE, "");
+                p.flowers = PlayerPrefs.GetInt(PREF_KEY_FLOWERS, 0);
+                p.achievePoints = PlayerPrefs.GetInt(PREF_KEY_ACHIEVE_POINTS, 0);
+                p.residenceDays = PlayerPrefs.GetInt(PREF_KEY_RESIDENCE_DAYS, 1);
+                p.friendsCount = PlayerPrefs.GetInt(PREF_KEY_FRIENDS_COUNT, 0);
+                p.birthday = PlayerPrefs.GetString(PREF_KEY_BIRTHDAY, "保密");
+                p.status = PlayerPrefs.GetString(PREF_KEY_STATUS, "漫游中 🚀");
+                p.costumeId = PlayerPrefs.GetInt(PREF_KEY_COSTUME, 7);
+                p.unlockedCostumes = PlayerPrefs.GetString(PREF_KEY_UNLOCKED_COSTUMES, "7");
+                p.unlockedTitles = PlayerPrefs.GetString(PREF_KEY_UNLOCKED_TITLES, "");
             }
             else
             {
+                // 初始化全新档案：一开始成就、衣服等所有高级内容均为空/未获得
                 p.username = GenerateRandomNickname();
                 p.avatarId = UnityEngine.Random.Range(0, AvatarNames.Length);
                 p.gender = "secret";
                 p.age = 0;
-                p.bio = "这家伙太懒,什么都没留下...";
-                p.level = 100;
+                p.bio = "这家伙太懒，什么都没留下...";
+                p.level = 1;
                 p.uid = UnityEngine.Random.Range(1000000, 9999999).ToString();
-                p.region = "中国湖北";
+                p.region = "未知";
                 p.guild = "无";
-                p.title = "天赋异禀";
-                p.birthday = "2002-05-20";
-                p.status = "休闲中 ☕";
-                p.flowers = 4080;
-                p.costumeId = 0;
+                p.title = "";
+                p.flowers = 0;
+                p.achievePoints = 0;
+                p.residenceDays = 1;
+                p.friendsCount = 0;
+                p.birthday = "保密";
+                p.status = "漫游中 🚀";
+                p.costumeId = 7;
+                p.unlockedCostumes = "7";
+                p.unlockedTitles = "";
+
+                p.SaveToPrefs();
             }
             return p;
         }
@@ -132,6 +153,7 @@ namespace SmartSpace.Network
         public void SaveToPrefs()
         {
             PlayerPrefs.SetInt(PREF_KEY_HAS_PROFILE, 1);
+            PlayerPrefs.SetInt(PREF_KEY_PROFILE_VERSION, CURRENT_PROFILE_VERSION);
             PlayerPrefs.SetString(PREF_KEY_USERNAME, username);
             PlayerPrefs.SetInt(PREF_KEY_AVATAR, avatarId);
             PlayerPrefs.SetString(PREF_KEY_GENDER, gender);
@@ -143,10 +165,38 @@ namespace SmartSpace.Network
             PlayerPrefs.SetString(PREF_KEY_GUILD, guild);
             PlayerPrefs.SetString(PREF_KEY_TITLE, title);
             PlayerPrefs.SetInt(PREF_KEY_FLOWERS, flowers);
+            PlayerPrefs.SetInt(PREF_KEY_ACHIEVE_POINTS, achievePoints);
+            PlayerPrefs.SetInt(PREF_KEY_RESIDENCE_DAYS, residenceDays);
+            PlayerPrefs.SetInt(PREF_KEY_FRIENDS_COUNT, friendsCount);
             PlayerPrefs.SetString(PREF_KEY_BIRTHDAY, birthday);
             PlayerPrefs.SetString(PREF_KEY_STATUS, status);
             PlayerPrefs.SetInt(PREF_KEY_COSTUME, costumeId);
+            PlayerPrefs.SetString(PREF_KEY_UNLOCKED_COSTUMES, unlockedCostumes);
+            PlayerPrefs.SetString(PREF_KEY_UNLOCKED_TITLES, unlockedTitles);
             PlayerPrefs.Save();
+        }
+
+        public bool IsCostumeUnlocked(int id)
+        {
+            if (id == 7) return true; // 经典蓝灰基础制式探索服始终已拥有
+            if (string.IsNullOrEmpty(unlockedCostumes)) return false;
+            var parts = unlockedCostumes.Split(',');
+            foreach (var part in parts)
+            {
+                if (int.TryParse(part.Trim(), out int val) && val == id) return true;
+            }
+            return false;
+        }
+
+        public bool IsTitleUnlocked(string titleName)
+        {
+            if (string.IsNullOrEmpty(titleName) || string.IsNullOrEmpty(unlockedTitles)) return false;
+            var parts = unlockedTitles.Split(',');
+            foreach (var part in parts)
+            {
+                if (part.Trim() == titleName.Trim()) return true;
+            }
+            return false;
         }
 
         public static string GenerateRandomNickname()
@@ -211,6 +261,8 @@ namespace SmartSpace.Network
                 residenceDays = this.residenceDays,
                 friendsCount = this.friendsCount,
                 costumeId = this.costumeId,
+                unlockedCostumes = this.unlockedCostumes,
+                unlockedTitles = this.unlockedTitles,
                 birthday = this.birthday,
                 status = this.status
             };
